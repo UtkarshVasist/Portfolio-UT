@@ -22,12 +22,15 @@ export function createBackdrop() {
   let placed = 0;
   for (let i = 0; placed < COUNT && i < COUNT * 4; i++) {
     const ang = rand(i) * Math.PI * 2;
-    const radius = 24 + rand(i * 1.7) * 18;      // close enough to frame every side
+    // pulled in tight around the plaza edge (13-15.5) so only the very
+    // center stays open; wider/shorter footprints read as "closer and
+    // bigger" without growing the skyline vertically
+    const radius = 16.5 + rand(i * 1.7) * 8;
     const x = Math.cos(ang) * radius;
     const z = Math.sin(ang) * radius;
-    const w = 2.5 + rand(i * 3.1) * 5;
-    const d = 2.5 + rand(i * 5.3) * 5;
-    const h = 5 + rand(i * 7.9) * 16;
+    const w = 4 + rand(i * 3.1) * 7;
+    const d = 4 + rand(i * 5.3) * 7;
+    const h = 4 + rand(i * 7.9) * 8;
     dummy.position.set(x, h / 2, z);
     dummy.scale.set(w, h, d);
     dummy.rotation.y = rand(i * 2.2) * Math.PI;
@@ -53,7 +56,7 @@ export function createBackdrop() {
   });
   for (let i = 0; i < 40; i++) {
     const ang = rand(i * 11.1) * Math.PI * 2;
-    const radius = 24 + rand(i * 13.3) * 18;
+    const radius = 16.5 + rand(i * 13.3) * 8;
     const m = new THREE.Mesh(speckGeo, speckMat);
     m.position.set(Math.cos(ang) * radius, 2 + rand(i * 17.7) * 14, Math.sin(ang) * radius);
     m.lookAt(0, m.position.y, 0);

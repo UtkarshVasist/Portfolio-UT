@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { THEME, BUILDINGS } from '../config.js';
 
 // Builds the 5 hero buildings from BUILDINGS data. Each is a low-poly
@@ -13,6 +14,20 @@ const bodyColorFor = (type) => {
   if (type === 'kiosk') return 0x1e1f29;
   return THEME.stone;
 };
+
+// Roughly a third darker than the body — used on the top face so roofs
+// read as a distinct, shadowed plane instead of matching the walls.
+const _topColor = new THREE.Color();
+const topColorFor = (type) => _topColor.setHex(bodyColorFor(type)).multiplyScalar(0.55).getHex();
+
+// A box body whose top (+y) face is darker than its four side faces.
+// BoxGeometry's default face-group order is [+x,-x,+y,-y,+z,-z], so a
+// 6-material array maps straight onto that without extra geometry work.
+function bodyMaterials(type) {
+  const side = new THREE.MeshStandardMaterial({ color: bodyColorFor(type), roughness: 0.9, metalness: 0.05, ...BUMP });
+  const top = new THREE.MeshStandardMaterial({ color: topColorFor(type), roughness: 0.95, metalness: 0.05, ...BUMP });
+  return [side, side, top, top, side, side];
+}
 
 // Thin dark outline on a mesh's own geometry — the cheapest way to make
 // a solid-color low-poly box read as a defined structure instead of a
@@ -48,15 +63,19 @@ function noiseBumpTexture() {
 // standard shared bump settings, spread onto any body/roof material
 const BUMP = { bumpMap: noiseBumpTexture(), bumpScale: 0.035 };
 
+// Window quads are batched into at most two draw calls per building (lit +
+// dim) instead of one Mesh per window — with dozens of windows per facade
+// across several buildings, individual meshes were the single biggest
+// contributor to draw-call count and frame hitches.
+const _dummy = new THREE.Object3D();
 function makeWindows(w, h, d, height, accent) {
-  // emissive window quads on the four side faces
   const group = new THREE.Group();
   const winMat = new THREE.MeshStandardMaterial({
     color: THEME.windowLit, emissive: THEME.windowLit,
-    emissiveIntensity: 1.6, roughness: 1, metalness: 0,
+    emissiveIntensity: 1.0, roughness: 1, metalness: 0,
   });
   const dimMat = new THREE.MeshStandardMaterial({
-    color: 0x14131c, emissive: 0x3a2a16, emissiveIntensity: 0.35,
+    color: 0x14131c, emissive: 0x3a2a16, emissiveIntensity: 0.3,
     roughness: 1, metalness: 0,
   });
   const winGeo = new THREE.PlaneGeometry(0.5, 0.7);
@@ -70,39 +89,41 @@ function makeWindows(w, h, d, height, accent) {
     { n: [-1, 0, 0], span: d, off: [-w / 2 - 0.02, 0, 0] },
   ];
   let seed = w * 13.1 + height * 7.7;
+  const litGeoms = [];
+  const dimGeoms = [];
   for (const f of faces) {
     const fcols = Math.max(2, Math.floor(f.span / 1.1));
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < fcols; c++) {
         seed += 1;
         const lit = (Math.sin(seed * 12.9898) * 43758.5453 % 1 + 1) % 1 > 0.42;
-        const m = new THREE.Mesh(winGeo, lit ? winMat : dimMat);
         const u = (c + 0.5) / fcols - 0.5;
         const v = (r + 0.6) / rows;
-        m.position.set(
+        _dummy.position.set(
           f.off[0] + f.n[2] * u * f.span,
           v * (height - 0.6) + 0.3,
           f.off[2] + f.n[0] * -u * f.span,
         );
-        m.lookAt(
-          m.position.x + f.n[0],
-          m.position.y,
-          m.position.z + f.n[2],
+        _dummy.lookAt(
+          _dummy.position.x + f.n[0],
+          _dummy.position.y,
+          _dummy.position.z + f.n[2],
         );
-        group.add(m);
+        _dummy.updateMatrix();
+        const geo = winGeo.clone().applyMatrix4(_dummy.matrix);
+        (lit ? litGeoms : dimGeoms).push(geo);
       }
     }
   }
+  if (litGeoms.length) group.add(new THREE.Mesh(mergeGeometries(litGeoms), winMat));
+  if (dimGeoms.length) group.add(new THREE.Mesh(mergeGeometries(dimGeoms), dimMat));
   return group;
 }
 
 function makeTower(b) {
   const [w, d] = b.size;
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: bodyColorFor(b.type), roughness: 0.9, metalness: 0.05, ...BUMP,
-  });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(w, b.height, d), bodyMat);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, b.height, d), bodyMaterials(b.type));
   body.position.y = b.height / 2;
   body.castShadow = true; body.receiveShadow = true;
   addEdges(body);
@@ -110,7 +131,7 @@ function makeTower(b) {
   // stepped crown
   const crown = new THREE.Mesh(
     new THREE.BoxGeometry(w * 0.6, b.height * 0.16, d * 0.6),
-    new THREE.MeshStandardMaterial({ color: 0x2a2a36, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: 0x17171e, roughness: 0.9 }),
   );
   crown.position.y = b.height + b.height * 0.08;
   crown.castShadow = true;
@@ -130,10 +151,7 @@ function makeTower(b) {
 function makeBlock(b, roofTrim) {
   const [w, d] = b.size;
   const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(w, b.height, d),
-    new THREE.MeshStandardMaterial({ color: bodyColorFor(b.type), roughness: 0.9, metalness: 0.05, ...BUMP }),
-  );
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, b.height, d), bodyMaterials(b.type));
   body.position.y = b.height / 2;
   body.castShadow = true; body.receiveShadow = true;
   addEdges(body);
@@ -154,10 +172,7 @@ function makeKiosk(b) {
   const [w, d] = b.size;
   const g = new THREE.Group();
   // low booth with a glowing sign panel — the resume "stop"
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(w, b.height, d),
-    new THREE.MeshStandardMaterial({ color: bodyColorFor(b.type), roughness: 0.9, ...BUMP }),
-  );
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w, b.height, d), bodyMaterials(b.type));
   base.position.y = b.height / 2;
   base.castShadow = true; base.receiveShadow = true;
   addEdges(base);
@@ -165,7 +180,7 @@ function makeKiosk(b) {
   // roof slab overhang
   const roof = new THREE.Mesh(
     new THREE.BoxGeometry(w + 0.6, 0.2, d + 0.6),
-    new THREE.MeshStandardMaterial({ color: 0x1e1e28, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0x121218, roughness: 0.8 }),
   );
   roof.position.y = b.height + 0.1;
   roof.castShadow = true;

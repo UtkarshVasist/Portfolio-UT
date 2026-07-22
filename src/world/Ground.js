@@ -37,16 +37,5 @@ export function createGround() {
   grid.material.opacity = 0.35;
   group.add(grid);
 
-  // glowing brass compass ring around the central monument
-  const ringGeo = new THREE.RingGeometry(3.1, 3.35, 64);
-  ringGeo.rotateX(-Math.PI / 2);
-  const ringMat = new THREE.MeshStandardMaterial({
-    color: THEME.brass, emissive: THEME.brass, emissiveIntensity: 0.5,
-    roughness: 0.6, metalness: 0.4, transparent: true, opacity: 0.55,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.position.y = 0.03;
-  group.add(ring);
-
   return group;
 }
