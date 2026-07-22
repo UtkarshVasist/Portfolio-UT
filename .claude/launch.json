@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "portfolio-v5",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\Utkarsh\\portfolio-v5-link", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}

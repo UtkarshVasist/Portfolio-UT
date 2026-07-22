@@ -1,0 +1,2014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Portfolio City — Steampunk Noir</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏙️</text></svg>">
+<style>
+  /* ============================================================
+     GLOBAL STYLES — fullscreen canvas + HTML HUD overlay
+     ============================================================ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0f; }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: crosshair;
+    touch-action: none;          /* enables tap-to-move on mobile without scrolling */
+  }
+
+  /* Big marquee title — serif display face, deliberately paired against
+     the monospace "terminal" face used everywhere else for HUD/signage */
+  #title {
+    position: fixed;
+    top: 12px; left: 0; right: 0;
+    text-align: center;
+    font: 700 clamp(22px, 4.4vw, 46px)/1 Georgia, 'Times New Roman', serif;
+    letter-spacing: 0.13em;
+    color: #ffb347;
+    text-shadow:
+      0 0 2px #fff8ec,
+      0 0 10px rgba(255, 140, 0, 0.85),
+      0 0 26px rgba(255, 107, 0, 0.5),
+      0 0 60px rgba(255, 107, 0, 0.22);
+    pointer-events: none;
+    user-select: none;
+    z-index: 6;
+    animation: titleFlicker 7s ease-in-out infinite;
+  }
+  @keyframes titleFlicker {
+    0%, 91%, 100% { opacity: 1; }
+    92%   { opacity: 0.72; }
+    93%   { opacity: 1; }
+    94.5% { opacity: 0.8; }
+    95%   { opacity: 1; }
+  }
+
+  /* Intro hint — fades in, holds, fades out */
+  #hint {
+    position: fixed;
+    top: clamp(48px, 8.5vw, 68px); left: 0; right: 0;
+    text-align: center;
+    font: 700 12px "Courier New", monospace;
+    letter-spacing: 4px;
+    color: #e8d9b0;
+    text-shadow: 0 0 14px rgba(255, 140, 0, 0.45);
+    pointer-events: none;
+    opacity: 0;
+    animation: hintFade 8s ease-in-out 0.8s forwards;
+    z-index: 5;
+  }
+  @keyframes hintFade {
+    0%   { opacity: 0; }
+    10%  { opacity: 1; }
+    78%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #hint { animation-duration: 0.5s; opacity: 1; }
+    #title { animation: none; }
+  }
+  @media (max-width: 480px) {
+    /* clears the top-left minimap on narrow screens */
+    #title { top: 108px; }
+    #hint { top: calc(108px + clamp(28px, 9vw, 42px)); }
+  }
+
+  /* Bottom HUD bar */
+  #hud {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 9px 12px;
+    text-align: center;
+    font: 700 11px "Courier New", monospace;
+    letter-spacing: 2px;
+    color: #8a7434;
+    background: rgba(8, 8, 13, 0.9);
+    border-top: 1px solid rgba(184, 115, 51, 0.35);
+    user-select: none;
+    pointer-events: none;
+    z-index: 5;
+  }
+  #hud .key {
+    display: inline-block;
+    padding: 1px 5px;
+    margin: 0 2px;
+    border: 1px solid rgba(197, 160, 40, 0.4);
+    border-radius: 3px;
+    color: #d98a1f;
+  }
+  #hud .sep { color: rgba(184, 115, 51, 0.5); margin: 0 8px; }
+  #hudName { color: #ff8c00; text-shadow: 0 0 8px rgba(255, 140, 0, 0.7); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="title">PORTFOLIO CITY</div>
+<div id="hint">◢ EXPLORE THE CITY — CLICK A BUILDING TO ENTER ◣</div>
+<div id="hud">
+  <span class="key">WASD</span>/<span class="key">&#8592;&#8593;&#8595;&#8594;</span> MOVE
+  <span class="sep">&#9679;</span>
+  <span class="key">E</span>/<span class="key">CLICK</span> ENTER
+  <span id="hudName"></span>
+</div>
+
+<script>
+'use strict';
+/* ================================================================
+   PORTFOLIO CITY — isometric steampunk-noir portfolio world
+   Single-file, vanilla JS, HTML5 Canvas 2D. No dependencies.
+
+   COMPOSITION (from the hand sketch): a fully-built city block. Every
+   outer edge of the grid is closed off by a building — interactive
+   storefronts and their supporting dark "backdrop" neighbors form an
+   unbroken wall on all four sides — with an open plaza at the center
+   for the fountain, a wall-mounted billboard, and the bus stop. That's
+   what keeps the scene feeling dense and composed instead of a few
+   props scattered on an empty diamond.
+
+   Sections:
+     1. THEME + CONFIG          — colors & tunables (edit freely)
+     2. WORLD DATA              — BUILDINGS, BACKDROP, LAMPS, VENTS…
+     3. IsometricRenderer       — projection + camera + canvas
+     4. World                   — grid, obstacles, A*, ground art
+     5. BuildingManager         — building rendering + proximity
+     6. Player                  — movement, pathing, animation
+     7. ParticleSystem          — steam
+     8. InputHandler            — keyboard + pointer (mouse/touch)
+     9. Minimap                 — top-left overlay
+    10. UIOverlay               — prompts, HUD, transitions
+    11. Atmosphere              — rain, fog, moon, wires, grain
+    12. Game                    — wiring + main loop + NPC hover tips
+   ================================================================ */
+
+/* ================================================================
+   1. THEME — every color lives here for easy reskinning
+   ================================================================ */
+const THEME = {
+  bg:         '#0a0a0f',
+  bgSky:      '#0d1117',
+  amber:      '#ff8c00',
+  orange:     '#ff6b00',
+  amberSoft:  '#ffb347',
+  copper:     '#b87333',
+  brass:      '#c5a028',
+  teal:       '#2a5f5f',
+  tealGlow:   '#3fa8a8',
+  text:       '#e8d9b0',
+
+  // ground
+  stoneLo:    '#12121a',
+  stoneHi:    '#1b1b26',
+  grout:      '#08080d',
+  walkLo:     '#191d26',
+  walkHi:     '#20242f',
+  curb:       '#05050a',
+
+  // backdrop filler buildings (silhouette city)
+  backTop:    '#171721',
+  backLeft:   '#101017',
+  backRight:  '#0b0b11',
+
+  windowLit:  '#ff9d2e',
+  windowHalf: '#7a4515',
+  windowDim:  '#131320',
+  windowHalo: 'rgba(255,140,0,0.15)',
+
+  steam:      '220,225,235',
+  lampPool:   '255,150,50',
+  rain:       'rgba(150,168,195,0.13)',
+  fog:        '148,162,186',
+  moon:       '#d9e2ee',
+};
+
+const CONFIG = {
+  TILE_W: 64, TILE_H: 32,
+  GRID: 15,                    // tight city block — every edge is built out (see BACKDROP)
+  MAX_PARTICLES: 200,
+  INTERACT_RADIUS: 2,          // tiles (Chebyshev, measured to the door)
+  PLAYER_SPEED: 3.4,           // tiles per second
+  CAM_LERP: 4.5,
+  TRANSITION_TIME: 0.55,
+  RAIN_DROPS: 110,
+  HOVER_RADIUS: 24,             // px, mouse-hover hit test for NPC tooltips
+  TOUCH_HOVER_TIME: 3.5,        // seconds a tapped NPC's tooltip stays up on touch
+  ZOOM: 1.45,                   // camera closeness — town fills the frame like a diorama
+};
+const HW = CONFIG.TILE_W / 2;  // 32
+const HH = CONFIG.TILE_H / 2;  // 16
+
+/* ================================================================
+   2. WORLD DATA — edit names, positions, sizes, URLs here
+   gx,gy = top-left footprint tile; w,h = footprint in tiles.
+   `door` = the walkable tile facing the drawn entrance; clicking a
+   building always walks the player here before entering.
+
+   Grid map (15x15) — every edge tile belongs to a structure:
+     row0-1  : NW filler | BB2 roofboard | BB3 roofboard | TOWER | NE filler
+     col0    : (filler) | About | Skills | filler | filler   (west wall)
+     col14   : NE filler | East fillers                       (east wall)
+     row14   : filler | filler | filler | filler | filler      (south wall)
+   Interior plaza (open): fountain, wall-mounted BB1, resume stop.
+   ================================================================ */
+const BUILDINGS = [
+  { id: 'projects-hub', name: 'ALL PROJECTS',       sub: 'Portfolio',    type: 'tower',      gx: 8, gy: 0,  w: 6, h: 4, hgt: 204, promptH: 264, url: '/projects',           sign: 'PROJECTS', mm: '#ff8c00', door: { x: 11, y: 4,  face: 'NE' } },
+  // Rooftop billboards, mounted flush on the FRONT (south) edge of their host roofs — see drawRoofboard
+  { id: 'project-2',    name: 'PROJECT 02',         sub: 'Case Study',   type: 'roofboard',  gx: 2, gy: 0,  w: 3, h: 2, hgt: 96,  promptH: 224, url: '/project-2',          sign: '02',       mm: '#c5a028', door: { x: 3,  y: 2,  face: 'NE' } },
+  { id: 'project-3',    name: 'PROJECT 03',         sub: 'Case Study',   type: 'roofboard',  gx: 5, gy: 0,  w: 3, h: 2, hgt: 128, promptH: 258, url: '/project-3',          sign: '03',       mm: '#c5a028', door: { x: 6,  y: 2,  face: 'NE' } },
+  // Free-standing pole billboard in the open plaza — was flush-mounted on the
+  // tower's front face, but that crammed it right into the big PROJECTS sign
+  { id: 'project-1',    name: 'PROJECT 01',         sub: 'Case Study',   type: 'billboard',  gx: 7, gy: 5, w: 2, h: 1, hgt: 128, promptH: 176, url: '/project-1',          sign: '01',       mm: '#c5a028', door: { x: 8,  y: 6,  face: 'NE' } },
+  { id: 'about',        name: 'ABOUT ME',           sub: 'Bio',          type: 'brownstone', gx: 0, gy: 2,  w: 3, h: 2, hgt: 66,  promptH: 106, url: '/about',               sign: 'ABOUT',    mm: '#b87333', door: { x: 3,  y: 3,  face: 'NW' } },
+  { id: 'skills',       name: 'SKILLS & STRENGTHS', sub: 'Expertise',    type: 'guild',      gx: 0, gy: 4,  w: 3, h: 3, hgt: 84,  promptH: 124, url: '/skills',              sign: 'SKILLS',   mm: '#b87333', door: { x: 3,  y: 6,  face: 'NW' } },
+  { id: 'github',       name: 'GITHUB',             sub: 'Open Source',  type: 'fountain',   gx: 6, gy: 8,  w: 1, h: 1, hgt: 40,  promptH: 84,  url: 'https://github.com',  sign: '',         mm: '#3fa8a8', door: { x: 6,  y: 9,  face: 'NE' } },
+  { id: 'resume',       name: 'RESUME STOP',        sub: 'Résumé',       type: 'busstop',    gx: 6, gy: 12, w: 2, h: 1, hgt: 46,  promptH: 112, url: '/resume',              sign: 'RESUME',   mm: '#ff6b00', door: { x: 7,  y: 13, face: 'NE' } },
+];
+
+// Non-interactive silhouette buildings that close off every edge of the
+// block. Deliberately darker than the interactive ones — value hierarchy
+// is what makes the dense skyline read instead of looking like clutter.
+// A few carry a small painted `sign` — cosmetic-only shopfronts (copper, not
+// amber) so the skyline reads as a real block of businesses, not filler.
+const BACKDROP = [
+  { gx: 0,  gy: 0,  w: 2, h: 2, hgt: 90,  roof: 'chimney', sign: 'APOTHECARY' },   // NW corner
+  { gx: 14, gy: 0,  w: 1, h: 4, hgt: 140, roof: 'antenna', beacon: true },         // NE sliver, behind the tower
+  { gx: 0,  gy: 7,  w: 2, h: 4, hgt: 70,  roof: 'chimney', sign: 'TAILOR' },       // west wall
+  { gx: 0,  gy: 11, w: 2, h: 4, hgt: 100, roof: 'water'   },                       // west wall, SW corner
+  { gx: 2,  gy: 12, w: 3, h: 3, hgt: 58,  roof: 'chimney', sign: 'BAKERY' },       // south wall
+  { gx: 5,  gy: 14, w: 4, h: 1, hgt: 44,  roof: 'ac'      },                       // south wall, thin edge row
+  { gx: 9,  gy: 12, w: 3, h: 3, hgt: 62,  roof: 'ac'      },                       // south wall
+  { gx: 12, gy: 4,  w: 3, h: 4, hgt: 110, roof: 'water'   },                       // east wall
+  { gx: 12, gy: 8,  w: 3, h: 4, hgt: 76,  roof: 'chimney', sign: 'CURIOS' },       // east wall
+  { gx: 12, gy: 12, w: 3, h: 3, hgt: 54,  roof: 'ac'      },                       // east wall, SE corner
+];
+
+// Gas lamp posts (occupy their tile). Indexed by WIRES below.
+const LAMPS = [
+  { gx: 4,  gy: 4 }, { gx: 10, gy: 4 }, { gx: 2,  gy: 8 },
+  { gx: 10, gy: 8 }, { gx: 4,  gy: 11 }, { gx: 10, gy: 11 },
+];
+// Sagging cables strung between lamp heads (pairs of LAMPS indices)
+const WIRES = [[0, 1], [2, 3], [4, 5]];
+
+// Steam vents. elev 0 => street grate; elev > 0 => rooftop
+const VENTS = [
+  { x: 5.5,  y: 5.5,  elev: 0 },
+  { x: 9.5,  y: 9.5,  elev: 0 },
+  { x: 3.5,  y: 10.5, elev: 0 },
+  { x: 11.5, y: 7.5,  elev: 0 },
+  { x: 10.6, y: 1.4,  elev: 204 },   // tower crown
+  { x: 12.4, y: 2.4,  elev: 204 },   // tower crown
+  { x: 6.5,  y: 0.7,  elev: 128 },   // BB3 host roof, behind the board
+  { x: 1.3,  y: 0.8,  elev: 90  },   // APOTHECARY chimney
+  { x: 1.3,  y: 8.8,  elev: 70  },   // TAILOR chimney
+  { x: 13.8, y: 9.8,  elev: 76  },   // CURIOS chimney
+];
+
+// Street-tile puddles (baked into the ground art)
+const PUDDLES = [
+  { gx: 4, gy: 6 }, { gx: 8, gy: 7 }, { gx: 5, gy: 10 },
+  { gx: 7, gy: 9 }, { gx: 2, gy: 9 },
+];
+
+// Crates & barrels — non-walkable street props
+const PROPS = [
+  { gx: 5,  gy: 9,  kind: 'crate'  },
+  { gx: 10, gy: 10, kind: 'crate'  },
+  { gx: 3,  gy: 9,  kind: 'crate'  },
+  { gx: 11, gy: 10, kind: 'barrel' },
+  { gx: 2,  gy: 11, kind: 'barrel' },
+  { gx: 9,  gy: 7,  kind: 'barrel' },
+  { gx: 2,  gy: 7,  kind: 'crate'  },   // outside TAILOR
+  { gx: 11, gy: 9,  kind: 'barrel' },   // outside CURIOS
+];
+
+// NPCs — hover (mouse) or tap (touch) to read their name + a quote.
+// Placeholder flavor text; swap in real names/quotes any time.
+const NPCS = [
+  { gx: 4, gy: 9,  coat: '#24444a', hat: '#141a20', umbrella: true, name: 'Vera Kessler',
+    quotes: ["Best portfolio on this side of the river.", "I heard the client cried tears of joy.", "That grid alignment? Poetry."] },
+  { gx: 9, gy: 10, coat: '#4a3320', hat: '#201612', name: 'Otto Renner',
+    quotes: ["They redesigned my whole business overnight.", "Never seen pixels so well-behaved.", "I'd hire them twice if I could."] },
+  { gx: 5, gy: 12, coat: '#252534', hat: '#15151e', umbrella: true, name: 'Mabel Frost',
+    quotes: ["The typography alone gave me chills.", "Rumor has it they dream in Bézier curves.", "Every project ships like clockwork."] },
+];
+
+const PLAYER_START = { gx: 6, gy: 10 };   // in the plaza, fountain and resume both in view
+
+/* ================================================================
+   Small shared helpers
+   ================================================================ */
+function P(x, y) { return { x: (x - y) * HW, y: (x + y) * HH }; }
+function hash(n) { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); }
+// lighten (amt>0) or darken (amt<0) a #rrggbb color — powers the per-face gradients
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const f = amt < 0 ? (c) => c * (1 + amt) : (c) => c + (255 - c) * amt;
+  r = Math.max(0, Math.min(255, Math.round(f(r))));
+  g = Math.max(0, Math.min(255, Math.round(f(g))));
+  b = Math.max(0, Math.min(255, Math.round(f(b))));
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+
+function poly(ctx, pts, fill, stroke, lw) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+}
+function isoSlab(ctx, gx, gy, w, h, z0, z1, cTop, cLeft, cRight) {
+  const A = P(gx, gy), B = P(gx + w, gy), C = P(gx + w, gy + h), D = P(gx, gy + h);
+  poly(ctx, [{ x: A.x, y: A.y - z1 }, { x: B.x, y: B.y - z1 }, { x: C.x, y: C.y - z1 }, { x: D.x, y: D.y - z1 }], cTop);
+  poly(ctx, [{ x: D.x, y: D.y - z1 }, { x: C.x, y: C.y - z1 }, { x: C.x, y: C.y - z0 }, { x: D.x, y: D.y - z0 }], cLeft);
+  poly(ctx, [{ x: C.x, y: C.y - z1 }, { x: B.x, y: B.y - z1 }, { x: B.x, y: B.y - z0 }, { x: C.x, y: C.y - z0 }], cRight);
+  return { A, B, C, D };
+}
+
+/* ================================================================
+   3. IsometricRenderer — projection, camera, canvas management
+   ================================================================ */
+class IsometricRenderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.cam = { x: 0, y: 0 };
+    this.zoom = CONFIG.ZOOM;
+    this.vw = 0; this.vh = 0;
+    this.dpr = 1;
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+  resize() {
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.vw = window.innerWidth;
+    this.vh = window.innerHeight;
+    this.canvas.width  = Math.round(this.vw * this.dpr);
+    this.canvas.height = Math.round(this.vh * this.dpr);
+    this.vignette = null;
+    this.sizeStamp = (this.sizeStamp || 0) + 1;
+  }
+  unproject(wx, wy) {
+    return { x: (wx / HW + wy / HH) / 2, y: (wy / HH - wx / HW) / 2 };
+  }
+  screenToWorld(cx, cy) {
+    return { x: (cx - this.vw / 2) / this.zoom + this.cam.x, y: (cy - this.vh / 2) / this.zoom + this.cam.y };
+  }
+  worldToScreen(wx, wy) {
+    return { x: (wx - this.cam.x) * this.zoom + this.vw / 2, y: (wy - this.cam.y) * this.zoom + this.vh / 2 };
+  }
+  begin() {
+    const c = this.ctx;
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    c.save();
+    c.translate(this.vw / 2, this.vh / 2);
+    c.scale(this.zoom, this.zoom);
+    c.translate(-this.cam.x, -this.cam.y);
+  }
+  end() { this.ctx.restore(); }
+  viewBounds(buffer) {
+    const b = buffer || 0;
+    const hw = this.vw / 2 / this.zoom, hh = this.vh / 2 / this.zoom;
+    return {
+      l: this.cam.x - hw - b, r: this.cam.x + hw + b,
+      t: this.cam.y - hh - b, b2: this.cam.y + hh + b,
+    };
+  }
+}
+
+/* ================================================================
+   4. World — grid, obstacle map, A*, and the pre-rendered ground
+   ================================================================ */
+class World {
+  constructor() {
+    const G = CONFIG.GRID;
+    this.walk = [];
+    for (let y = 0; y < G; y++) this.walk.push(new Array(G).fill(true));
+
+    this.buildingAt = {};
+    const stampFootprint = (b, clickable) => {
+      for (let y = b.gy; y < b.gy + b.h; y++)
+        for (let x = b.gx; x < b.gx + b.w; x++) {
+          this.walk[y][x] = false;
+          if (clickable) this.buildingAt[x + ',' + y] = b;
+        }
+    };
+    for (const b of BUILDINGS) stampFootprint(b, true);
+    for (const f of BACKDROP)  stampFootprint(f, false);
+    for (const p of PROPS) this.walk[p.gy][p.gx] = false;
+    for (const l of LAMPS) this.walk[l.gy][l.gx] = false;
+    for (const n of NPCS)  this.walk[n.gy][n.gx] = false;
+
+    this.grates = {};
+    for (const v of VENTS) if (v.elev === 0) this.grates[Math.floor(v.x) + ',' + Math.floor(v.y)] = true;
+
+    // sidewalk = walkable tile orthogonally adjacent to any structure.
+    this.sidewalk = [];
+    for (let y = 0; y < G; y++) {
+      this.sidewalk.push(new Array(G).fill(false));
+      for (let x = 0; x < G; x++) {
+        if (!this.walk[y][x]) continue;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (!this.inBounds(nx, ny)) continue;
+          if (!this.walk[ny][nx] && !this.propAt(nx, ny)) { this.sidewalk[y][x] = true; break; }
+        }
+      }
+    }
+    this.buildGround();
+  }
+  propAt(x, y) {
+    return PROPS.some(p => p.gx === x && p.gy === y) ||
+           LAMPS.some(l => l.gx === x && l.gy === y) ||
+           NPCS.some(n => n.gx === x && n.gy === y);
+  }
+  inBounds(x, y) { return x >= 0 && y >= 0 && x < CONFIG.GRID && y < CONFIG.GRID; }
+  isWalkable(x, y) { return this.inBounds(x, y) && this.walk[y][x]; }
+  buildingAtTile(x, y) { return this.buildingAt[x + ',' + y] || null; }
+
+  // ---- A* pathfinding (4-neighbor) -------------------------------
+  findPath(sx, sy, tx, ty) {
+    if (!this.isWalkable(tx, ty)) return null;
+    if (sx === tx && sy === ty) return [];
+    const G = CONFIG.GRID, key = (x, y) => x + y * G;
+    const open = [{ x: sx, y: sy, g: 0, f: Math.abs(tx - sx) + Math.abs(ty - sy) }];
+    const came = new Map(), gBest = new Map([[key(sx, sy), 0]]);
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    while (open.length) {
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if (open[i].f < open[bi].f) bi = i;
+      const cur = open.splice(bi, 1)[0];
+      if (cur.x === tx && cur.y === ty) {
+        const path = [];
+        let k = key(tx, ty);
+        while (came.has(k)) { path.push({ x: k % G, y: Math.floor(k / G) }); k = came.get(k); }
+        return path.reverse();
+      }
+      for (const [dx, dy] of DIRS) {
+        const nx = cur.x + dx, ny = cur.y + dy;
+        if (!this.isWalkable(nx, ny)) continue;
+        const nk = key(nx, ny), ng = cur.g + 1;
+        if (ng < (gBest.has(nk) ? gBest.get(nk) : Infinity)) {
+          gBest.set(nk, ng);
+          came.set(nk, key(cur.x, cur.y));
+          open.push({ x: nx, y: ny, g: ng, f: ng + Math.abs(tx - nx) + Math.abs(ty - ny) });
+        }
+      }
+    }
+    return null;
+  }
+
+  /* ---- ground: pre-rendered once to an offscreen canvas ---------- */
+  buildGround() {
+    const GS = 2;
+    this.gOX = 500; this.gOY = 20;      // world-px origin inside the bake
+    const cv = document.createElement('canvas');
+    cv.width = 1000 * GS; cv.height = 520 * GS;
+    const ctx = cv.getContext('2d');
+    ctx.scale(GS, GS);
+    ctx.translate(this.gOX, this.gOY);
+    const G = CONFIG.GRID;
+
+    for (let gy = 0; gy < G; gy++)
+      for (let gx = 0; gx < G; gx++)
+        this.bakeTile(ctx, gx, gy);
+
+    // brass compass ring inlaid around the fountain plaza
+    const f = BUILDINGS.find(b => b.type === 'fountain');
+    const fc = P(f.gx + 0.5, f.gy + 0.5);
+    for (const [rx, a] of [[92, 0.10], [72, 0.06]]) {
+      ctx.strokeStyle = 'rgba(197,160,40,' + a + ')';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.ellipse(fc.x, fc.y, rx, rx / 2, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    for (const pd of PUDDLES) this.bakePuddle(ctx, pd);
+    this.groundCv = cv;
+  }
+
+  // SPRITE SLOT: tile-cobblestone / tile-sidewalk — replace bakeTile with 64x32 tile PNG blits
+  bakeTile(ctx, gx, gy) {
+    const top = P(gx, gy), rt = P(gx + 1, gy), bt = P(gx + 1, gy + 1), lt = P(gx, gy + 1);
+    if (!this.walk[gy][gx] && !this.propAt(gx, gy)) {
+      poly(ctx, [top, rt, bt, lt], '#0d0d13');
+      return;
+    }
+    if (this.sidewalk[gy][gx]) {
+      const s = hash(gx * 91.7 + gy * 33.1);
+      poly(ctx, [top, rt, bt, lt], s > 0.5 ? THEME.walkHi : THEME.walkLo, THEME.grout, 1);
+      const m0 = P(gx + 0.5, gy), m1 = P(gx + 0.5, gy + 1);
+      ctx.strokeStyle = THEME.grout; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(m0.x, m0.y); ctx.lineTo(m1.x, m1.y); ctx.stroke();
+      const edges = [
+        { dx: 0, dy: -1, a: top, b: rt }, { dx: 1, dy: 0, a: rt, b: bt },
+        { dx: 0, dy: 1,  a: bt, b: lt }, { dx: -1, dy: 0, a: lt, b: top },
+      ];
+      for (const e of edges) {
+        const nx = gx + e.dx, ny = gy + e.dy;
+        if (this.inBounds(nx, ny) && this.walk[ny][nx] && !this.sidewalk[ny][nx]) {
+          ctx.strokeStyle = THEME.curb; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
+          ctx.strokeStyle = 'rgba(197,180,150,0.06)'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y - 1); ctx.lineTo(e.b.x, e.b.y - 1); ctx.stroke();
+        }
+      }
+    } else {
+      poly(ctx, [top, rt, bt, lt], THEME.grout);
+      for (let r = 0; r < 2; r++) {
+        for (let c = 0; c < 4; c++) {
+          const sd = hash(gx * 127.1 + gy * 311.7 + r * 17.3 + c * 5.9);
+          if (sd > 0.96) continue;
+          const u0 = c * 0.25, v0 = r * 0.5, su = 0.25, sv = 0.5, k = 0.82;
+          const cu = u0 + su / 2, cvv = v0 + sv / 2;
+          const q = [
+            P(gx + cu - su * k / 2, gy + cvv - sv * k / 2),
+            P(gx + cu + su * k / 2, gy + cvv - sv * k / 2),
+            P(gx + cu + su * k / 2, gy + cvv + sv * k / 2),
+            P(gx + cu - su * k / 2, gy + cvv + sv * k / 2),
+          ];
+          const l = 0x12 + Math.floor(sd * 11);
+          poly(ctx, q, 'rgb(' + l + ',' + l + ',' + (l + 8) + ')');
+        }
+      }
+      const s = hash(gx * 12.3 + gy * 7.7);
+      if (s > 0.93) {
+        const c = P(gx + 0.3 + s * 0.4, gy + 0.3 + s * 0.3);
+        ctx.fillStyle = 'rgba(197,160,40,0.13)';
+        ctx.fillRect(c.x, c.y, 2, 1);
+      }
+    }
+
+    // SPRITE SLOT: tile-steam-grate — replace with 64x32 grate tile PNG
+    if (this.grates[gx + ',' + gy]) {
+      const c = P(gx + 0.5, gy + 0.5), k = 0.55;
+      poly(ctx, [
+        { x: c.x, y: c.y - HH * k }, { x: c.x + HW * k, y: c.y },
+        { x: c.x, y: c.y + HH * k }, { x: c.x - HW * k, y: c.y },
+      ], '#0b0b11', '#262630', 1);
+      ctx.strokeStyle = '#1a1a24';
+      ctx.beginPath();
+      for (let i = 1; i <= 3; i++) {
+        const a = P(gx + 0.25 + i * 0.125, gy + 0.28), b = P(gx + 0.25 + i * 0.125, gy + 0.72);
+        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      }
+      ctx.stroke();
+    }
+  }
+
+  bakePuddle(ctx, pd) {
+    const c = P(pd.gx + 0.5, pd.gy + 0.5);
+    const s = hash(pd.gx * 3.1 + pd.gy * 9.7);
+    const rx = 14 + s * 8, ry = rx * 0.42;
+    ctx.fillStyle = 'rgba(10,13,20,0.9)';
+    ctx.beginPath(); ctx.ellipse(c.x + (s - 0.5) * 14, c.y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(140,160,185,0.08)';
+    ctx.beginPath(); ctx.ellipse(c.x + (s - 0.5) * 14, c.y - 1, rx * 0.7, ry * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,150,50,0.12)';
+    ctx.fillRect(c.x + (s - 0.5) * 14 - 1, c.y - ry * 0.5, 2, ry);
+  }
+
+  drawGround(r, t) {
+    const ctx = r.ctx;
+    ctx.drawImage(this.groundCv, -this.gOX, -this.gOY, 1000, 520);
+
+    for (const key in this.grates) {
+      const [gx, gy] = key.split(',').map(Number);
+      const c = P(gx + 0.5, gy + 0.5), k = 0.5;
+      ctx.fillStyle = 'rgba(255,120,20,' + (0.05 + 0.04 * Math.sin(t * 3 + gx)) + ')';
+      poly(ctx, [
+        { x: c.x, y: c.y - HH * k }, { x: c.x + HW * k, y: c.y },
+        { x: c.x, y: c.y + HH * k }, { x: c.x - HW * k, y: c.y },
+      ], ctx.fillStyle);
+    }
+    this.drawLightPools(ctx, t);
+  }
+
+  drawLightPools(ctx, t) {
+    const pool = (cx, cy, rad, rgb, a) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(1, 0.5);
+      const g = ctx.createRadialGradient(0, 0, 4, 0, 0, rad);
+      g.addColorStop(0, 'rgba(' + rgb + ',' + a + ')');
+      g.addColorStop(1, 'rgba(' + rgb + ',0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(0, 0, rad, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    };
+    for (let i = 0; i < LAMPS.length; i++) {
+      const l = LAMPS[i], c = P(l.gx + 0.5, l.gy + 0.5);
+      const fl = 0.8 + 0.2 * Math.sin(t * 6.3 + i * 2.1);
+      pool(c.x, c.y, 78, THEME.lampPool, 0.12 * fl);
+    }
+    for (const b of BUILDINGS) {
+      if (b.type === 'fountain') continue;
+      const c = P(b.door.x + 0.5, b.door.y + 0.5);
+      pool(c.x, c.y, 40, '255,157,46', 0.07 + 0.02 * Math.sin(t * 2 + b.gx));
+    }
+    const f = BUILDINGS.find(b => b.type === 'fountain');
+    if (f) pool(P(f.gx + 0.5, f.gy + 0.5).x, P(f.gx + 0.5, f.gy + 0.5).y, 60, '63,168,168', 0.10);
+  }
+}
+
+/* ================================================================
+   5. BuildingManager — draws buildings, tracks proximity, enters
+   ================================================================ */
+class BuildingManager {
+  constructor(world, ui) {
+    this.world = world;
+    this.ui = ui;
+    this.near = null;
+  }
+
+  update(player) {
+    const px = Math.round(player.x), py = Math.round(player.y);
+    let best = null, bd = Infinity;
+    for (const b of BUILDINGS) {
+      const d = Math.max(Math.abs(px - b.door.x), Math.abs(py - b.door.y));
+      if (d <= CONFIG.INTERACT_RADIUS && d < bd) { bd = d; best = b; }
+    }
+    this.near = best;
+  }
+
+  enter(b) { this.ui.startTransition(b.url); }
+
+  /* ---------- shared drawing helpers ---------- */
+  // gradient-shaded iso box: top face reads a soft moonlit falloff, side
+  // faces read brighter near the roofline and fall into shadow toward the
+  // street — the single biggest thing separating "painted" from "flat CAD"
+  isoBox(ctx, gx, gy, w, h, hgt, cTop, cLeft, cRight, glow) {
+    const A = P(gx, gy), B = P(gx + w, gy), C = P(gx + w, gy + h), D = P(gx, gy + h);
+    const Az = { x: A.x, y: A.y - hgt }, Bz = { x: B.x, y: B.y - hgt }, Cz = { x: C.x, y: C.y - hgt }, Dz = { x: D.x, y: D.y - hgt };
+
+    if (glow) { ctx.save(); ctx.shadowColor = THEME.amber; ctx.shadowBlur = 22; }
+    const gTop = ctx.createLinearGradient(Az.x, Az.y, Cz.x, Cz.y);
+    gTop.addColorStop(0, shade(cTop, 0.16));
+    gTop.addColorStop(1, shade(cTop, -0.05));
+    poly(ctx, [Az, Bz, Cz, Dz], gTop);
+    if (glow) ctx.restore();
+
+    const gLeft = ctx.createLinearGradient(Dz.x, Dz.y, D.x, D.y);
+    gLeft.addColorStop(0, shade(cLeft, 0.09));
+    gLeft.addColorStop(1, shade(cLeft, -0.2));
+    poly(ctx, [Dz, Cz, C, D], gLeft);
+
+    const gRight = ctx.createLinearGradient(Cz.x, Cz.y, C.x, C.y);
+    gRight.addColorStop(0, shade(cRight, 0.05));
+    gRight.addColorStop(1, shade(cRight, -0.24));
+    poly(ctx, [Cz, Bz, B, C], gRight);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.beginPath(); ctx.moveTo(C.x, C.y - hgt); ctx.lineTo(C.x, C.y); ctx.stroke();
+    return { A, B, C, D };
+  }
+
+  // SPRITE SLOT: texture-stonecourse — coursed mortar joints + worn-block
+  // highlights on both wall faces of an iso box. Cheap procedural stand-in
+  // for painted masonry; call right after isoBox() with the same footprint.
+  stoneTexture(ctx, gx, gy, w, h, hgt) {
+    const rows = Math.max(3, Math.round(hgt / 13));
+    const rowH = hgt / rows;
+    const drawFace = (edgeFn, faceW, seed) => {
+      ctx.strokeStyle = 'rgba(0,0,0,0.20)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let r = 1; r < rows; r++) {
+        const v = r * rowH;
+        const a = edgeFn(0), b = edgeFn(faceW);
+        ctx.moveTo(a.x, a.y - v); ctx.lineTo(b.x, b.y - v);
+      }
+      ctx.stroke();
+      const cols = Math.max(2, Math.round(faceW * 2.2));
+      for (let r = 0; r < rows; r++) {
+        const v0 = r * rowH, v1 = (r + 1) * rowH;
+        const offset = (r % 2) * 0.5;
+        ctx.beginPath();
+        for (let c = 0; c <= cols; c++) {
+          const u = (c + offset) / cols * faceW;
+          if (u < 0.02 || u > faceW - 0.02) continue;
+          const p = edgeFn(u);
+          ctx.moveTo(p.x, p.y - v0); ctx.lineTo(p.x, p.y - v1);
+        }
+        ctx.strokeStyle = 'rgba(0,0,0,0.14)';
+        ctx.stroke();
+        const s = hash(seed + r * 7.7);
+        if (s > 0.72) {
+          const u = (s * 613) % faceW;
+          const p = edgeFn(u);
+          ctx.fillStyle = 'rgba(255,255,255,0.035)';
+          ctx.fillRect(p.x - 5, p.y - v1, 9, rowH * 0.75);
+        }
+      }
+    };
+    drawFace((u) => P(gx + u, gy + h), w, gx * 17.3 + gy * 5.1);
+    drawFace((u) => P(gx + w, gy + h - u), h, gx * 5.1 + gy * 17.3 + 100);
+  }
+
+  winL(ctx, b, u, v, wu, hh, mode, halo) {
+    const E = P(b.gx + u, b.gy + b.h);
+    const x0 = E.x, y0 = E.y - v;
+    const col = mode === 2 ? THEME.windowLit : mode === 1 ? THEME.windowHalf : THEME.windowDim;
+    if (mode === 2 && halo) {
+      ctx.fillStyle = THEME.windowHalo;
+      ctx.fillRect(x0 - 3, y0 - hh - 3, wu * HW + 8, hh + 6);
+      ctx.save(); ctx.shadowColor = THEME.windowLit; ctx.shadowBlur = 10;
+    }
+    poly(ctx, [
+      { x: x0, y: y0 }, { x: x0 + wu * HW, y: y0 + wu * HH },
+      { x: x0 + wu * HW, y: y0 + wu * HH - hh }, { x: x0, y: y0 - hh },
+    ], col);
+    if (mode === 2 && halo) ctx.restore();
+  }
+  winR(ctx, b, u, v, wu, hh, mode, halo) {
+    const E = P(b.gx + b.w, b.gy + b.h - u);
+    const x0 = E.x, y0 = E.y - v;
+    const col = mode === 2 ? THEME.windowLit : mode === 1 ? THEME.windowHalf : THEME.windowDim;
+    if (mode === 2 && halo) {
+      ctx.fillStyle = THEME.windowHalo;
+      ctx.fillRect(x0 - 3, y0 - wu * HH - hh - 3, wu * HW + 6, hh + wu * HH + 6);
+      ctx.save(); ctx.shadowColor = THEME.windowLit; ctx.shadowBlur = 10;
+    }
+    poly(ctx, [
+      { x: x0, y: y0 }, { x: x0 + wu * HW, y: y0 - wu * HH },
+      { x: x0 + wu * HW, y: y0 - wu * HH - hh }, { x: x0, y: y0 - hh },
+    ], col);
+    if (mode === 2 && halo) ctx.restore();
+  }
+  winMode(seed, litChance) {
+    const s = hash(seed);
+    return s < litChance ? 2 : s < litChance + 0.16 ? 1 : 0;
+  }
+  faceText(ctx, face, ox, oy, text, px, color, glowBlur) {
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.transform(1, face === 'L' ? HH / HW : -HH / HW, 0, 1, 0, 0);
+    ctx.font = '700 ' + px + 'px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (glowBlur) { ctx.shadowColor = color; ctx.shadowBlur = glowBlur; }
+    ctx.fillStyle = color;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+  shadowEllipse(ctx, x, y, rx, ry, a) {
+    ctx.fillStyle = 'rgba(0,0,0,' + (a || 0.35) + ')';
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  doorR(ctx, b, uDoor) {
+    const dr = P(b.gx + b.w, b.gy + b.h - uDoor);
+    poly(ctx, [
+      { x: dr.x, y: dr.y }, { x: dr.x + 0.6 * HW, y: dr.y - 0.6 * HH },
+      { x: dr.x + 0.6 * HW, y: dr.y - 0.6 * HH - 30 }, { x: dr.x, y: dr.y - 30 },
+    ], '#100c06', 'rgba(197,160,40,0.4)', 1);
+    ctx.save();
+    ctx.shadowColor = THEME.amberSoft; ctx.shadowBlur = 10;
+    ctx.fillStyle = 'rgba(255,157,46,0.55)';
+    ctx.fillRect(dr.x + 7, dr.y - 26, 7, 22);
+    ctx.restore();
+    return dr;
+  }
+  awningR(ctx, b, uFrom, uTo, v) {
+    const a0 = P(b.gx + b.w, b.gy + b.h - uFrom);
+    const a1 = P(b.gx + b.w, b.gy + b.h - uTo);
+    const out = { x: 13, y: 7 };
+    const stripes = 4;
+    for (let i = 0; i < stripes; i++) {
+      const t0 = i / stripes, t1 = (i + 1) / stripes;
+      const p0 = { x: a0.x + (a1.x - a0.x) * t0, y: a0.y + (a1.y - a0.y) * t0 - v };
+      const p1 = { x: a0.x + (a1.x - a0.x) * t1, y: a0.y + (a1.y - a0.y) * t1 - v };
+      poly(ctx, [
+        p0, p1,
+        { x: p1.x + out.x, y: p1.y + out.y + 6 },
+        { x: p0.x + out.x, y: p0.y + out.y + 6 },
+      ], i % 2 ? '#33200f' : '#8c4d16');
+    }
+    ctx.strokeStyle = '#150e06'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(a0.x + out.x, a0.y - v + out.y + 6);
+    ctx.lineTo(a1.x + out.x, a1.y - v + out.y + 6);
+    ctx.stroke();
+  }
+  fireEscapeL(ctx, b, uFrom, uTo, levels) {
+    ctx.strokeStyle = 'rgba(170,180,200,0.16)';
+    ctx.fillStyle = 'rgba(16,16,24,0.75)';
+    ctx.lineWidth = 1;
+    const out = { x: -11, y: 6 };
+    for (let i = 0; i < levels.length; i++) {
+      const v = levels[i];
+      const e0 = P(b.gx + uFrom, b.gy + b.h), e1 = P(b.gx + uTo, b.gy + b.h);
+      const p0 = { x: e0.x, y: e0.y - v }, p1 = { x: e1.x, y: e1.y - v };
+      const q0 = { x: p0.x + out.x, y: p0.y + out.y }, q1 = { x: p1.x + out.x, y: p1.y + out.y };
+      poly(ctx, [p0, p1, q1, q0], 'rgba(16,16,24,0.75)', 'rgba(170,180,200,0.16)', 1);
+      ctx.beginPath();
+      for (let k = 0; k <= 3; k++) {
+        const rx = q0.x + (q1.x - q0.x) * (k / 3), ry = q0.y + (q1.y - q0.y) * (k / 3);
+        ctx.moveTo(rx, ry); ctx.lineTo(rx, ry - 7);
+      }
+      ctx.moveTo(q0.x, q0.y - 7); ctx.lineTo(q1.x, q1.y - 7);
+      ctx.stroke();
+    }
+  }
+
+  /* ---------- backdrop / host bodies ---------- */
+  // SPRITE SLOT: backdrop-building — replace with dark silhouette building PNGs
+  drawBackdropBody(ctx, f, litChance, t) {
+    this.isoBox(ctx, f.gx, f.gy, f.w, f.h, f.hgt, THEME.backTop, THEME.backLeft, THEME.backRight);
+    this.stoneTexture(ctx, f.gx, f.gy, f.w, f.h, f.hgt);
+    const A = P(f.gx, f.gy), B = P(f.gx + f.w, f.gy), C = P(f.gx + f.w, f.gy + f.h), D = P(f.gx, f.gy + f.h);
+    poly(ctx, [{ x: A.x, y: A.y - f.hgt }, { x: B.x, y: B.y - f.hgt }, { x: C.x, y: C.y - f.hgt }, { x: D.x, y: D.y - f.hgt }],
+      null, 'rgba(90,95,115,0.22)', 1);
+    const bb = { gx: f.gx, gy: f.gy, w: f.w, h: f.h };
+    for (let v = 14; v <= f.hgt - 16; v += 15) {
+      for (let u = 0.3; u < f.w - 0.25; u += 0.55) {
+        const m = this.winMode(f.gx * 41 + u * 7.9 + v * 2.7, litChance);
+        this.winL(ctx, bb, u, v, 0.26, 7, m === 2 ? 1 : m, false);
+      }
+      for (let u = 0.3; u < f.h - 0.25; u += 0.55) {
+        const m = this.winMode(f.gy * 73 + u * 5.3 + v * 3.1, litChance * 0.7);
+        this.winR(ctx, bb, u, v, 0.26, 7, m === 2 ? 1 : m, false);
+      }
+    }
+    this.drawFlavorSign(ctx, f, t);
+    this.drawRoofProp(ctx, f, t);
+  }
+  // small painted shop sign swinging from a bracket — cosmetic only, in
+  // muted copper (not amber neon) so it reads as ambient city, not a portal
+  drawFlavorSign(ctx, f, t) {
+    if (!f.sign) return;
+    const c = P(f.gx + f.w, f.gy + f.h - 0.3);
+    const sway = Math.sin(t * 1.1 + f.gx * 3) * 1.4;
+    ctx.strokeStyle = '#2a1f14'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(c.x, c.y - 34); ctx.lineTo(c.x + 11, c.y - 34); ctx.stroke();
+    ctx.save();
+    ctx.translate(c.x + 11 + sway * 0.3, c.y - 21);
+    ctx.rotate(sway * 0.018);
+    ctx.fillStyle = '#18110a';
+    ctx.fillRect(-17, -9, 34, 18);
+    ctx.strokeStyle = 'rgba(197,160,40,0.4)'; ctx.lineWidth = 1;
+    ctx.strokeRect(-17, -9, 34, 18);
+    ctx.font = '700 6.5px "Courier New", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(197,160,40,0.8)';
+    ctx.fillText(f.sign, 0, 0);
+    ctx.restore();
+  }
+  drawRoofProp(ctx, f, t) {
+    const c = P(f.gx + f.w / 2, f.gy + f.h / 2);
+    const topY = c.y - f.hgt;
+    if (f.roof === 'water') {
+      ctx.strokeStyle = '#0e0e14'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(c.x - 8, topY); ctx.lineTo(c.x - 6, topY - 10);
+      ctx.moveTo(c.x + 8, topY); ctx.lineTo(c.x + 6, topY - 10);
+      ctx.stroke();
+      ctx.fillStyle = '#241c16';
+      ctx.fillRect(c.x - 9, topY - 26, 18, 16);
+      ctx.beginPath(); ctx.ellipse(c.x, topY - 26, 9, 3.4, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#2c231b'; ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(c.x - 9, topY - 27); ctx.lineTo(c.x, topY - 36); ctx.lineTo(c.x + 9, topY - 27);
+      ctx.closePath(); ctx.fillStyle = '#1a140f'; ctx.fill();
+      ctx.strokeStyle = 'rgba(197,160,40,0.3)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(c.x - 9, topY - 18); ctx.lineTo(c.x + 9, topY - 18); ctx.stroke();
+    } else if (f.roof === 'antenna') {
+      ctx.strokeStyle = '#1c1c26'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(c.x, topY); ctx.lineTo(c.x, topY - 30);
+      ctx.moveTo(c.x - 6, topY - 20); ctx.lineTo(c.x + 6, topY - 20);
+      ctx.moveTo(c.x - 4, topY - 26); ctx.lineTo(c.x + 4, topY - 26);
+      ctx.stroke();
+      if (f.beacon && (t * 0.9 + f.gx) % 1.6 < 0.9) {
+        ctx.save();
+        ctx.shadowColor = '#ff3b30'; ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ff3b30';
+        ctx.beginPath(); ctx.arc(c.x, topY - 30, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    } else if (f.roof === 'chimney') {
+      ctx.fillStyle = '#1c1c26';
+      ctx.fillRect(c.x - 12, topY - 12, 7, 12);
+      ctx.fillRect(c.x + 4, topY - 9, 6, 9);
+      ctx.fillStyle = '#101018';
+      ctx.fillRect(c.x - 12, topY - 13, 7, 2);
+      ctx.fillRect(c.x + 4, topY - 10, 6, 2);
+    } else if (f.roof === 'ac') {
+      ctx.fillStyle = '#1a1a24';
+      ctx.fillRect(c.x - 8, topY - 7, 16, 7);
+      ctx.strokeStyle = '#0d0d14';
+      ctx.strokeRect(c.x - 8, topY - 7, 16, 7);
+    }
+  }
+
+  // shared glowing billboard panel (screen-facing for readability)
+  // SPRITE SLOT: billboard-panel — replace with billboard PNG
+  drawBoardPanel(ctx, cx, byTop, bw, bh, sign, t, near, seed) {
+    const bx = cx - bw / 2;
+    const flick = hash(Math.floor(t * 7) + seed) > 0.08 ? 1 : 0.5;
+    ctx.save();
+    ctx.shadowColor = THEME.amber;
+    ctx.shadowBlur = (near ? 22 : 12) * flick;
+    ctx.fillStyle = '#0e0e16';
+    ctx.fillRect(bx, byTop, bw, bh);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,140,0,' + (0.9 * flick) + ')';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, byTop, bw, bh);
+    ctx.strokeStyle = 'rgba(197,160,40,0.35)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 4, byTop + 4, bw - 8, bh - 8);
+    ctx.fillStyle = THEME.brass;
+    for (const [rx, ry] of [[7, 7], [bw - 7, 7], [7, bh - 7], [bw - 7, bh - 7]])
+      ctx.fillRect(bx + rx - 1, byTop + ry - 1, 2, 2);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.globalAlpha = flick;
+    ctx.font = '700 12px "Courier New", monospace';
+    ctx.fillStyle = THEME.text;
+    ctx.fillText('PROJECT', cx, byTop + 20);
+    ctx.font = '700 24px "Courier New", monospace';
+    ctx.fillStyle = THEME.amber;
+    ctx.shadowColor = THEME.amber; ctx.shadowBlur = 10;
+    ctx.fillText(sign, cx, byTop + 41);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------- per-building draw dispatch ---------- */
+  drawBuilding(ctx, b, t) {
+    const isNear = this.near === b;
+    switch (b.type) {
+      case 'tower':      this.drawTower(ctx, b, t, isNear); break;
+      case 'roofboard':  this.drawRoofboard(ctx, b, t, isNear); break;
+      case 'guild':      this.drawGuild(ctx, b, t, isNear); break;
+      case 'fountain':   this.drawFountain(ctx, b, t, isNear); break;
+      case 'busstop':    this.drawBusStop(ctx, b, t, isNear); break;
+      case 'brownstone': this.drawBrownstone(ctx, b, t, isNear); break;
+    }
+    if (isNear) {
+      const A = P(b.gx, b.gy), B = P(b.gx + b.w, b.gy), C = P(b.gx + b.w, b.gy + b.h), D = P(b.gx, b.gy + b.h);
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.2 * Math.sin(t * 5);
+      poly(ctx, [A, B, C, D], null, THEME.amber, 1.5);
+      ctx.restore();
+    }
+  }
+
+  // SPRITE SLOT: building-projects — replace with isometric skyscraper PNG (6x4, ~204px)
+  drawTower(ctx, b, t, near) {
+    const BODY = 172;
+    this.isoBox(ctx, b.gx, b.gy, b.w, b.h, BODY, '#20202c', '#181822', '#10101a', near);
+    this.stoneTexture(ctx, b.gx, b.gy, b.w, b.h, BODY);
+    const D = P(b.gx, b.gy + b.h), C = P(b.gx + b.w, b.gy + b.h);
+    for (const v of [52, 104, 150]) {
+      ctx.strokeStyle = 'rgba(197,160,40,0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(D.x, D.y - v); ctx.lineTo(C.x, C.y - v); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let u = 1; u < b.w; u++) {
+      const e = P(b.gx + u, b.gy + b.h);
+      ctx.moveTo(e.x, e.y); ctx.lineTo(e.x, e.y - BODY);
+    }
+    ctx.stroke();
+    for (let v = 20; v <= BODY - 20; v += 16) {
+      for (let u = 0.4; u < b.w - 0.35; u += 0.5) {
+        if (v > 78 && v < 138 && u > 1.25 && u < 4.75) continue;
+        const m = this.winMode(b.gx * 31 + u * 7.3 + v * 1.7, 0.5);
+        this.winL(ctx, b, u, v, 0.26, 8, m, m === 2 && v % 48 < 16);
+      }
+    }
+    for (let v = 20; v <= BODY - 20; v += 16) {
+      for (let u = 0.4; u < b.h - 0.35; u += 0.5) {
+        const m = this.winMode(b.gy * 17 + u * 9.1 + v * 2.3, 0.4);
+        this.winR(ctx, b, u, v, 0.26, 8, m, false);
+      }
+    }
+    this.fireEscapeR(ctx, b, 2.6, 3.6, [36, 68, 100]);
+    const s0 = P(b.gx + 1.35, b.gy + b.h), s1 = P(b.gx + 4.65, b.gy + b.h);
+    poly(ctx, [
+      { x: s0.x, y: s0.y - 84 }, { x: s1.x, y: s1.y - 84 },
+      { x: s1.x, y: s1.y - 132 }, { x: s0.x, y: s0.y - 132 },
+    ], 'rgba(8,8,12,0.94)', THEME.amber, 1.5);
+    const sc = P(b.gx + 3, b.gy + b.h);
+    const flick = hash(Math.floor(t * 9)) > 0.06 ? 1 : 0.55;
+    ctx.save(); ctx.globalAlpha = flick;
+    this.faceText(ctx, 'L', sc.x, sc.y - 108, b.sign, 21, THEME.amber, 14);
+    ctx.restore();
+    const d0 = P(b.gx + 2.72, b.gy + b.h);
+    poly(ctx, [
+      { x: d0.x, y: d0.y }, { x: d0.x + 0.56 * HW, y: d0.y + 0.56 * HH },
+      { x: d0.x + 0.56 * HW, y: d0.y + 0.56 * HH - 28 }, { x: d0.x, y: d0.y - 28 },
+    ], '#1a1208', 'rgba(197,160,40,0.35)', 1);
+    ctx.save();
+    ctx.shadowColor = THEME.amberSoft; ctx.shadowBlur = 10;
+    ctx.fillStyle = 'rgba(255,157,46,0.55)';
+    ctx.fillRect(d0.x + 6, d0.y - 22, 8, 24);
+    ctx.restore();
+    poly(ctx, [
+      { x: d0.x - 3, y: d0.y - 30 }, { x: d0.x + 0.56 * HW + 3, y: d0.y + 0.56 * HH - 30 },
+      { x: d0.x + 0.56 * HW + 7, y: d0.y + 0.56 * HH - 26 }, { x: d0.x + 1, y: d0.y - 26 },
+    ], '#14141c', 'rgba(197,160,40,0.25)', 1);
+    isoSlab(ctx, b.gx + 1.2, b.gy + 1, b.w - 2.4, b.h - 2, BODY, b.hgt, '#242430', '#1a1a26', '#12121c');
+    const cr = P(b.gx + 2.2, b.gy + 2);
+    ctx.strokeStyle = '#1c1c26'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cr.x, cr.y - b.hgt); ctx.lineTo(cr.x, cr.y - b.hgt - 26); ctx.stroke();
+    if ((t * 0.8) % 1.8 < 1.0) {
+      ctx.save();
+      ctx.shadowColor = '#ff3b30'; ctx.shadowBlur = 9;
+      ctx.fillStyle = '#ff3b30';
+      ctx.beginPath(); ctx.arc(cr.x, cr.y - b.hgt - 26, 2.2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    for (const v of VENTS) {
+      if (v.elev !== b.hgt) continue;
+      const c = P(v.x, v.y);
+      ctx.fillStyle = '#2c2c38';
+      ctx.fillRect(c.x - 7, c.y - b.hgt - 8, 14, 9);
+      ctx.strokeStyle = '#3c3c4a';
+      ctx.strokeRect(c.x - 7, c.y - b.hgt - 8, 14, 9);
+    }
+  }
+  fireEscapeR(ctx, b, uFrom, uTo, levels) {
+    const out = { x: 11, y: 6 };
+    for (let i = 0; i < levels.length; i++) {
+      const v = levels[i];
+      const e0 = P(b.gx + b.w, b.gy + b.h - uFrom), e1 = P(b.gx + b.w, b.gy + b.h - uTo);
+      const p0 = { x: e0.x, y: e0.y - v }, p1 = { x: e1.x, y: e1.y - v };
+      const q0 = { x: p0.x + out.x, y: p0.y + out.y }, q1 = { x: p1.x + out.x, y: p1.y + out.y };
+      poly(ctx, [p0, p1, q1, q0], 'rgba(16,16,24,0.75)', 'rgba(170,180,200,0.15)', 1);
+      ctx.strokeStyle = 'rgba(170,180,200,0.15)';
+      ctx.beginPath();
+      for (let k = 0; k <= 3; k++) {
+        const rx = q0.x + (q1.x - q0.x) * (k / 3), ry = q0.y + (q1.y - q0.y) * (k / 3);
+        ctx.moveTo(rx, ry); ctx.lineTo(rx, ry - 7);
+      }
+      ctx.moveTo(q0.x, q0.y - 7); ctx.lineTo(q1.x, q1.y - 7);
+      ctx.stroke();
+    }
+  }
+
+  // SPRITE SLOT: building-roofboard — dark host building + rooftop billboard PNG.
+  // Mounted flush at the FRONT (south) roof edge — legs plant exactly at the two
+  // edge corners so the sign reads as bolted onto the roofline, not floating.
+  drawRoofboard(ctx, b, t, near) {
+    this.drawBackdropBody(ctx, { gx: b.gx, gy: b.gy, w: b.w, h: b.h, hgt: b.hgt, roof: 'none' }, 0.30, t);
+    const e0 = P(b.gx, b.gy + b.h), e1 = P(b.gx + b.w, b.gy + b.h);
+    const y0 = e0.y - b.hgt, y1 = e1.y - b.hgt;
+    const legH = 34;
+    ctx.strokeStyle = '#2c2833'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(e0.x, y0); ctx.lineTo(e0.x, y0 - legH);
+    ctx.moveTo(e1.x, y1); ctx.lineTo(e1.x, y1 - legH);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(e0.x, y0 - 8); ctx.lineTo((e0.x + e1.x) / 2, (y0 + y1) / 2 - legH + 10);
+    ctx.moveTo(e1.x, y1 - 8); ctx.lineTo((e0.x + e1.x) / 2, (y0 + y1) / 2 - legH + 10);
+    ctx.stroke();
+    const boardW = (e1.x - e0.x) + 14;
+    const boardH = 62;
+    const cx = (e0.x + e1.x) / 2;
+    const topY = (y0 + y1) / 2 - legH - boardH;
+    this.drawBoardPanel(ctx, cx, topY, boardW, boardH, b.sign, t, near, b.gx + b.gy);
+    ctx.fillStyle = 'rgba(255,150,50,0.5)';
+    ctx.fillRect(cx - 1.5, topY + boardH, 3, 3);
+  }
+
+  // SPRITE SLOT: building-skills — guild-hall / library PNG (3x3)
+  drawGuild(ctx, b, t, near) {
+    this.isoBox(ctx, b.gx, b.gy, b.w, b.h, b.hgt, '#2c2a33', '#211f28', '#17161e', near);
+    this.stoneTexture(ctx, b.gx, b.gy, b.w, b.h, b.hgt);
+    const A = P(b.gx, b.gy), B = P(b.gx + b.w, b.gy), C = P(b.gx + b.w, b.gy + b.h), D = P(b.gx, b.gy + b.h);
+    poly(ctx, [{ x: A.x, y: A.y - b.hgt }, { x: B.x, y: B.y - b.hgt }, { x: C.x, y: C.y - b.hgt }, { x: D.x, y: D.y - b.hgt }],
+      null, 'rgba(197,160,40,0.5)', 1.5);
+    this.winR(ctx, b, 1.9, 30, 0.5, 26, 2, true);
+    this.winR(ctx, b, 2.55, 30, 0.4, 22, 2, false);
+    for (let u = 0.4; u < b.w - 0.3; u += 0.85)
+      this.winL(ctx, b, u, 34, 0.4, 20, this.winMode(u * 13.7 + 3, 0.3), false);
+    this.fireEscapeL(ctx, b, 0.5, 1.6, [26, 52]);
+    this.doorR(ctx, b, 0.8);
+    this.awningR(ctx, b, 0.62, 1.55, 36);
+    const sm = P(b.gx + b.w, b.gy + b.h - 1.1);
+    this.faceText(ctx, 'R', sm.x + 10, sm.y - 52, b.sign, 11, THEME.brass, 8);
+  }
+
+  // SPRITE SLOT: building-fountain — the plaza's central monument, fountain
+  // PNG + animated water frames. Deliberately more ornate than a park
+  // fountain — this is the town's centerpiece, like the reference's statue.
+  drawFountain(ctx, b, t, near) {
+    const c = P(b.gx + 0.5, b.gy + 0.5);
+    ctx.save();
+    if (near) { ctx.shadowColor = THEME.tealGlow; ctx.shadowBlur = 20; }
+    ctx.fillStyle = '#23232e';
+    ctx.beginPath(); ctx.ellipse(c.x, c.y, 32, 16, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = '#3c3c4c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(c.x, c.y, 32, 16, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(197,160,40,0.4)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(c.x, c.y, 28, 14, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#17393c';
+    ctx.beginPath(); ctx.ellipse(c.x, c.y, 24, 12, 0, 0, Math.PI * 2); ctx.fill();
+    for (let i = 0; i < 3; i++) {
+      const p = (t * 0.45 + i / 3) % 1;
+      ctx.strokeStyle = 'rgba(63,168,168,' + (0.55 * (1 - p)) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(c.x, c.y, 5 + p * 19, (5 + p * 19) / 2, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    // two-tier ornate pedestal, brass-banded
+    ctx.fillStyle = '#1c1c26';
+    ctx.fillRect(c.x - 7.5, c.y - 24, 15, 10);
+    ctx.strokeStyle = 'rgba(197,160,40,0.35)'; ctx.lineWidth = 1;
+    ctx.strokeRect(c.x - 7.5, c.y - 24, 15, 10);
+    ctx.fillStyle = '#232330';
+    ctx.fillRect(c.x - 4.5, c.y - 30, 9, 8);
+    ctx.strokeStyle = 'rgba(197,160,40,0.5)'; ctx.lineWidth = 1.2;
+    ctx.strokeRect(c.x - 4.5, c.y - 30, 9, 8);
+    ctx.beginPath(); ctx.moveTo(c.x - 5.5, c.y - 24.5); ctx.lineTo(c.x + 5.5, c.y - 24.5); ctx.stroke();
+    // warm glow washing up the pedestal from the water below
+    ctx.save();
+    ctx.shadowColor = THEME.tealGlow; ctx.shadowBlur = 14;
+    ctx.fillStyle = 'rgba(63,168,168,0.14)';
+    ctx.fillRect(c.x - 7.5, c.y - 24, 15, 10);
+    ctx.restore();
+    // SPRITE SLOT: fountain-octocat — replace silhouette with proper Octocat sprite
+    ctx.fillStyle = '#0b0d12';
+    ctx.beginPath(); ctx.ellipse(c.x, c.y - 36, 5, 5.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(c.x, c.y - 46, 6.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(c.x - 6, c.y - 49); ctx.lineTo(c.x - 8, c.y - 56); ctx.lineTo(c.x - 2, c.y - 52);
+    ctx.moveTo(c.x + 6, c.y - 49); ctx.lineTo(c.x + 8, c.y - 56); ctx.lineTo(c.x + 2, c.y - 52);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(63,168,168,' + (0.5 + 0.2 * Math.sin(t * 2)) + ')';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(c.x, c.y - 46, 6.5, Math.PI * 0.15, Math.PI * 0.95); ctx.stroke();
+  }
+
+  // SPRITE SLOT: building-busstop — bus shelter PNG (2x1). RESUME sign stands
+  // on top of the shelter roof, like a mini rooftop marquee.
+  drawBusStop(ctx, b, t, near) {
+    const A = P(b.gx, b.gy), B = P(b.gx + b.w, b.gy), C = P(b.gx + b.w, b.gy + b.h);
+    const H = b.hgt;
+    this.shadowEllipse(ctx, (A.x + C.x) / 2, (A.y + C.y) / 2, 40, 16, 0.25);
+    poly(ctx, [A, B, { x: B.x, y: B.y - H }, { x: A.x, y: A.y - H }], 'rgba(14,14,22,0.96)', 'rgba(184,115,51,0.55)', 1.5);
+    poly(ctx, [
+      P(b.gx + 0.3, b.gy + 0.35), P(b.gx + 1.7, b.gy + 0.35),
+      P(b.gx + 1.7, b.gy + 0.6), P(b.gx + 0.3, b.gy + 0.6),
+    ].map(p => ({ x: p.x, y: p.y - 10 })), '#3a2a1c', '#241a10', 1);
+    ctx.fillStyle = '#241a10';
+    const bl = P(b.gx + 0.45, b.gy + 0.5), br = P(b.gx + 1.55, b.gy + 0.5);
+    ctx.fillRect(bl.x - 1, bl.y - 10, 2, 10);
+    ctx.fillRect(br.x - 1, br.y - 10, 2, 10);
+    ctx.strokeStyle = '#5a4430'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (const p of [P(b.gx + 0.08, b.gy + 0.92), P(b.gx + 1.92, b.gy + 0.92)]) {
+      ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - H + 4);
+    }
+    ctx.stroke();
+    const r0 = P(b.gx - 0.15, b.gy - 0.15), r1 = P(b.gx + b.w + 0.15, b.gy - 0.15),
+          r2 = P(b.gx + b.w + 0.15, b.gy + b.h + 0.15), r3 = P(b.gx - 0.15, b.gy + b.h + 0.15);
+    poly(ctx, [
+      { x: r0.x, y: r0.y - H }, { x: r1.x, y: r1.y - H },
+      { x: r2.x, y: r2.y - H }, { x: r3.x, y: r3.y - H },
+    ], '#1e1e28', 'rgba(184,115,51,0.5)', 1.5);
+    // rooftop marquee, standing on two little legs
+    const rc = P(b.gx + b.w / 2, b.gy + b.h / 2);
+    const ry = rc.y - H;
+    const legH = 16, boardW = 58, boardH = 16;
+    ctx.strokeStyle = '#2c2833'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(rc.x - 16, ry); ctx.lineTo(rc.x - 16, ry - legH);
+    ctx.moveTo(rc.x + 16, ry); ctx.lineTo(rc.x + 16, ry - legH);
+    ctx.stroke();
+    const flick = hash(Math.floor(t * 8) + 3) > 0.07 ? 1 : 0.55;
+    ctx.save();
+    ctx.shadowColor = THEME.orange; ctx.shadowBlur = 9 * flick;
+    ctx.fillStyle = 'rgba(12,12,18,0.95)';
+    ctx.fillRect(rc.x - boardW / 2, ry - legH - boardH, boardW, boardH);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,107,0,' + (0.85 * flick) + ')';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(rc.x - boardW / 2, ry - legH - boardH, boardW, boardH);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 10px "Courier New", monospace';
+    ctx.globalAlpha = flick;
+    ctx.fillStyle = THEME.orange;
+    ctx.fillText(b.sign, rc.x, ry - legH - boardH / 2 + 1);
+    ctx.globalAlpha = 1;
+  }
+
+  // SPRITE SLOT: building-about — brownstone PNG (3x2), door on the street (SE) face
+  drawBrownstone(ctx, b, t, near) {
+    this.isoBox(ctx, b.gx, b.gy, b.w, b.h, b.hgt, '#332620', '#2b1e17', '#1f150f', near);
+    this.stoneTexture(ctx, b.gx, b.gy, b.w, b.h, b.hgt);
+    const A = P(b.gx, b.gy), B = P(b.gx + b.w, b.gy), C = P(b.gx + b.w, b.gy + b.h), D = P(b.gx, b.gy + b.h);
+    poly(ctx, [{ x: A.x, y: A.y - b.hgt }, { x: B.x, y: B.y - b.hgt }, { x: C.x, y: C.y - b.hgt }, { x: D.x, y: D.y - b.hgt }],
+      null, 'rgba(184,115,51,0.55)', 1.5);
+    for (const v of [16, 42]) this.winR(ctx, b, 1.35, v, 0.4, 14, 2, v === 42);
+    this.winR(ctx, b, 0.35, 42, 0.4, 14, 2, false);
+    this.doorR(ctx, b, 0.75);
+    this.awningR(ctx, b, 0.55, 1.35, 34);
+    for (let u = 0.35; u < b.w - 0.3; u += 0.75)
+      this.winL(ctx, b, u, 40, 0.4, 14, this.winMode(u * 13 + 40, 0.35), false);
+    this.fireEscapeL(ctx, b, 0.5, 1.7, [24, 46]);
+    const st = P(b.gx + b.w, b.gy + b.h - 0.72);
+    poly(ctx, [
+      { x: st.x + 2, y: st.y + 1 }, { x: st.x + 0.55 * HW, y: st.y - 0.55 * HH + 4 },
+      { x: st.x + 0.55 * HW + 7, y: st.y - 0.55 * HH + 8 }, { x: st.x + 9, y: st.y + 5 },
+    ], '#38281e');
+  }
+
+  /* ---------- street props ---------- */
+  drawLamp(ctx, l, i, t) {
+    const c = P(l.gx + 0.5, l.gy + 0.5);
+    const fl = 0.8 + 0.2 * Math.sin(t * 6.3 + i * 2.1);
+    this.shadowEllipse(ctx, c.x, c.y, 7, 3, 0.3);
+    ctx.fillStyle = '#23232e';
+    ctx.fillRect(c.x - 1.5, c.y - 62, 3, 62);
+    ctx.fillRect(c.x - 5, c.y - 64, 10, 3);
+    ctx.save();
+    ctx.shadowColor = THEME.amber;
+    ctx.shadowBlur = 14 * fl;
+    ctx.fillStyle = 'rgba(255,170,60,' + (0.95 * fl) + ')';
+    ctx.beginPath(); ctx.arc(c.x, c.y - 68, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    const g = ctx.createRadialGradient(c.x, c.y - 68, 2, c.x, c.y - 68, 26);
+    g.addColorStop(0, 'rgba(255,150,50,' + (0.22 * fl) + ')');
+    g.addColorStop(1, 'rgba(255,150,50,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(c.x, c.y - 68, 26, 0, Math.PI * 2); ctx.fill();
+  }
+
+  drawProp(ctx, p) {
+    const c = P(p.gx + 0.5, p.gy + 0.5);
+    if (p.kind === 'crate') {
+      this.shadowEllipse(ctx, c.x, c.y + 2, 13, 6, 0.3);
+      this.isoBox(ctx, p.gx + 0.22, p.gy + 0.22, 0.56, 0.56, 15, '#4a3620', '#3a2a18', '#2a1e10');
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1;
+      const e = P(p.gx + 0.22, p.gy + 0.78);
+      ctx.beginPath();
+      ctx.moveTo(e.x + 2, e.y - 12); ctx.lineTo(e.x + 0.56 * HW - 2, e.y + 0.56 * HH - 4);
+      ctx.moveTo(e.x + 2, e.y - 4);  ctx.lineTo(e.x + 0.56 * HW - 2, e.y + 0.56 * HH - 12);
+      ctx.stroke();
+    } else {
+      this.shadowEllipse(ctx, c.x, c.y + 2, 10, 5, 0.3);
+      ctx.fillStyle = '#33241a';
+      ctx.beginPath();
+      ctx.moveTo(c.x - 8, c.y - 2); ctx.bezierCurveTo(c.x - 10, c.y - 10, c.x - 10, c.y - 14, c.x - 8, c.y - 20);
+      ctx.lineTo(c.x + 8, c.y - 20); ctx.bezierCurveTo(c.x + 10, c.y - 14, c.x + 10, c.y - 10, c.x + 8, c.y - 2);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#41302a';
+      ctx.beginPath(); ctx.ellipse(c.x, c.y - 20, 8, 3.2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(197,160,40,0.5)'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(c.x - 9.5, c.y - 7); ctx.lineTo(c.x + 9.5, c.y - 7);
+      ctx.moveTo(c.x - 9.5, c.y - 15); ctx.lineTo(c.x + 9.5, c.y - 15);
+      ctx.stroke();
+    }
+  }
+
+  // SPRITE SLOT: npc-idle — NPC sprite sheet (static pose per NPC)
+  drawNPC(ctx, n, i, t) {
+    const c = P(n.gx + 0.5, n.gy + 0.5);
+    const sway = Math.sin(t * 1.4 + i * 2.7) * 0.7;
+    this.shadowEllipse(ctx, c.x, c.y, 8, 3.5, 0.35);
+    ctx.fillStyle = '#101018';
+    ctx.fillRect(c.x - 4, c.y - 9, 3, 9);
+    ctx.fillRect(c.x + 1, c.y - 9, 3, 9);
+    ctx.fillStyle = n.coat;
+    ctx.fillRect(c.x - 5 + sway * 0.3, c.y - 22, 10, 14);
+    ctx.fillStyle = '#b99b7a';
+    ctx.beginPath(); ctx.arc(c.x + sway * 0.5, c.y - 26, 4.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = n.hat;
+    ctx.beginPath(); ctx.ellipse(c.x + sway * 0.5, c.y - 29, 6, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(c.x - 3.5 + sway * 0.5, c.y - 34, 7, 5);
+    if (n.umbrella) {
+      ctx.strokeStyle = '#0d0d14'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(c.x + 6, c.y - 12); ctx.lineTo(c.x + 8 + sway, c.y - 40);
+      ctx.stroke();
+      ctx.fillStyle = '#14141d';
+      ctx.beginPath();
+      ctx.arc(c.x + 8 + sway, c.y - 38, 13, Math.PI, Math.PI * 2);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(150,165,190,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(c.x + 8 + sway, c.y - 38, 13, Math.PI, Math.PI * 2); ctx.stroke();
+    }
+    // cache this frame's screen anchor for hover/tap tooltip hit-testing (see Game)
+    n._wx = c.x; n._wy = c.y - 26;
+  }
+}
+
+/* ================================================================
+   6. Player — grid movement with smooth interpolation + pathing
+   ================================================================ */
+class Player {
+  constructor(world) {
+    this.world = world;
+    this.tx = PLAYER_START.gx; this.ty = PLAYER_START.gy;
+    this.x = this.tx; this.y = this.ty;
+    this.target = null;
+    this.path = [];
+    this.facing = 'SW';
+    this.bobT = 0;
+    this.moving = false;
+  }
+  face(dx, dy) {
+    if (dx > 0) this.facing = 'SE';
+    else if (dx < 0) this.facing = 'NW';
+    else if (dy > 0) this.facing = 'SW';
+    else if (dy < 0) this.facing = 'NE';
+  }
+  setPath(path) { if (path) this.path = path; }
+  planOrigin() { return this.target ? this.target : { x: this.tx, y: this.ty }; }
+
+  update(dt, input) {
+    const dir = input.dir();
+    if (dir && !this.target) {
+      this.face(dir.dx, dir.dy);
+      const nx = this.tx + dir.dx, ny = this.ty + dir.dy;
+      if (this.world.isWalkable(nx, ny)) { this.target = { x: nx, y: ny }; this.path = []; }
+    }
+    if (!this.target && this.path.length) {
+      const n = this.path.shift();
+      this.face(n.x - this.tx, n.y - this.ty);
+      this.target = n;
+    }
+    this.moving = !!this.target;
+    if (this.target) {
+      const spd = CONFIG.PLAYER_SPEED * dt;
+      const dx = this.target.x - this.x, dy = this.target.y - this.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= spd) {
+        this.x = this.target.x; this.y = this.target.y;
+        this.tx = this.target.x; this.ty = this.target.y;
+        this.target = null;
+      } else {
+        this.x += (dx / dist) * spd;
+        this.y += (dy / dist) * spd;
+      }
+      this.bobT += dt;
+    }
+  }
+
+  // SPRITE SLOT: player-walk-ne / player-walk-nw / player-walk-se / player-walk-sw
+  draw(ctx, t) {
+    const c = P(this.x + 0.5, this.y + 0.5);
+    const bob = this.moving ? Math.sin(this.bobT * 13) * 1.7 : Math.sin(t * 2) * 0.6;
+    const leg = this.moving ? Math.sin(this.bobT * 13) * 3 : 0;
+    const showFace = this.facing === 'SE' || this.facing === 'SW';
+    const sideX = this.facing === 'SE' || this.facing === 'NE' ? 1 : -1;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.ellipse(c.x, c.y + 1, 9, 4, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = '#15151d';
+    ctx.fillRect(c.x - 4.5, c.y - 10 + Math.max(0, leg) * -0.5, 4, 10 + Math.min(0, leg) * 0.5);
+    ctx.fillRect(c.x + 0.5, c.y - 10 + Math.max(0, -leg) * -0.5, 4, 10 + Math.min(0, -leg) * 0.5);
+
+    ctx.fillStyle = '#343442';
+    ctx.fillRect(c.x - 6, c.y - 25 + bob, 12, 16);
+    ctx.fillStyle = '#2a2a36';
+    ctx.fillRect(c.x - 6 + (sideX > 0 ? 7 : 0), c.y - 25 + bob, 5, 16);
+    ctx.fillStyle = '#b35a1e';
+    ctx.fillRect(c.x - 6, c.y - 25 + bob, 12, 3.5);
+    ctx.fillRect(c.x + sideX * -7, c.y - 23 + bob, 3, 8);
+
+    ctx.fillStyle = '#2a2a36';
+    ctx.fillRect(c.x - 8, c.y - 22 + bob + leg * 0.4, 3, 10);
+    ctx.fillRect(c.x + 5, c.y - 22 + bob - leg * 0.4, 3, 10);
+
+    ctx.fillStyle = '#c9a175';
+    ctx.beginPath(); ctx.arc(c.x, c.y - 30 + bob, 5, 0, Math.PI * 2); ctx.fill();
+    if (showFace) {
+      ctx.fillStyle = '#1a1a22';
+      ctx.fillRect(c.x - 2.5 + (this.facing === 'SE' ? 1.5 : -0.5), c.y - 31 + bob, 1.5, 2);
+      ctx.fillRect(c.x + 0.5 + (this.facing === 'SE' ? 1.5 : -0.5), c.y - 31 + bob, 1.5, 2);
+    }
+    ctx.fillStyle = '#1a1a24';
+    ctx.beginPath(); ctx.ellipse(c.x + sideX * 0.8, c.y - 33.5 + bob, 7.5, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(c.x - 4 + sideX * 0.8, c.y - 40 + bob, 8, 7);
+    ctx.fillStyle = '#b35a1e';
+    ctx.fillRect(c.x - 4 + sideX * 0.8, c.y - 35.5 + bob, 8, 1.5);
+  }
+}
+
+/* ================================================================
+   7. ParticleSystem — steam vents (cap 200)
+   ================================================================ */
+class ParticleSystem {
+  constructor() {
+    this.parts = [];
+    this.timers = VENTS.map(() => Math.random() * 0.2);
+  }
+  update(dt) {
+    for (let i = 0; i < VENTS.length; i++) {
+      this.timers[i] -= dt;
+      if (this.timers[i] <= 0 && this.parts.length < CONFIG.MAX_PARTICLES) {
+        this.timers[i] = 0.18 + Math.random() * 0.14;
+        const v = VENTS[i];
+        const c = P(v.x, v.y);
+        this.parts.push({
+          x: c.x + (Math.random() - 0.5) * 14,
+          y: c.y - v.elev - Math.random() * 4,
+          vx: (Math.random() - 0.5) * 7,
+          vy: -(15 + Math.random() * 13),
+          r: 2.5 + Math.random() * 3,
+          growth: 5 + Math.random() * 4,
+          life: 2.2 + Math.random() * 1.4,
+          age: 0,
+          aMax: 0.20 + Math.random() * 0.12,
+        });
+      }
+    }
+    for (let i = this.parts.length - 1; i >= 0; i--) {
+      const p = this.parts[i];
+      p.age += dt;
+      if (p.age >= p.life) { this.parts.splice(i, 1); continue; }
+      p.x += (p.vx + Math.sin(p.age * 3 + p.r) * 4) * dt;
+      p.y += p.vy * dt;
+      p.r += p.growth * dt;
+    }
+  }
+  draw(ctx) {
+    for (const p of this.parts) {
+      const k = p.age / p.life;
+      const a = p.aMax * (k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85);
+      ctx.fillStyle = 'rgba(' + THEME.steam + ',' + a.toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+/* ================================================================
+   8. InputHandler — keyboard + pointer (mouse & touch unified)
+   ================================================================ */
+class InputHandler {
+  constructor(game) {
+    this.game = game;
+    this.keys = new Set();
+    this.lastMoveKey = null;
+
+    const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+    window.addEventListener('keydown', (e) => {
+      if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+      if (MOVE_KEYS.includes(e.code)) { this.keys.add(e.code); this.lastMoveKey = e.code; }
+      if (e.code === 'KeyE' && !e.repeat) this.game.tryEnterNear();
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
+
+    const canvas = game.renderer.canvas;
+    canvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.game.onPointerDown(e.clientX, e.clientY);
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      canvas.style.cursor = this.game.isOverPrompt(e.clientX, e.clientY) ? 'pointer' : 'crosshair';
+      this.game.updateHover(e.clientX, e.clientY);
+    });
+    canvas.addEventListener('pointerleave', () => this.game.clearHover());
+  }
+  // W/Up -> NE (-y)   S/Down -> SW (+y)   A/Left -> NW (-x)   D/Right -> SE (+x)
+  dir() {
+    const MAP = {
+      KeyW: { dx: 0, dy: -1 }, ArrowUp: { dx: 0, dy: -1 },
+      KeyS: { dx: 0, dy: 1 },  ArrowDown: { dx: 0, dy: 1 },
+      KeyA: { dx: -1, dy: 0 }, ArrowLeft: { dx: -1, dy: 0 },
+      KeyD: { dx: 1, dy: 0 },  ArrowRight: { dx: 1, dy: 0 },
+    };
+    if (this.lastMoveKey && this.keys.has(this.lastMoveKey)) return MAP[this.lastMoveKey];
+    for (const k of this.keys) if (MAP[k]) return MAP[k];
+    return null;
+  }
+}
+
+/* ================================================================
+   9. Minimap — top-left overlay (screen space)
+   ================================================================ */
+class Minimap {
+  draw(ctx, player) {
+    const s = 5.5, pad = 7, x0 = 12, y0 = 12;
+    const size = CONFIG.GRID * s + pad * 2;
+    ctx.fillStyle = 'rgba(10,12,18,0.82)';
+    ctx.fillRect(x0, y0, size, size);
+    ctx.strokeStyle = 'rgba(184,115,51,0.55)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0 + 0.5, y0 + 0.5, size - 1, size - 1);
+    ctx.fillStyle = '#20222c';
+    for (const f of BACKDROP)
+      ctx.fillRect(x0 + pad + f.gx * s, y0 + pad + f.gy * s, f.w * s, f.h * s);
+    for (const b of BUILDINGS) {
+      ctx.fillStyle = b.mm;
+      ctx.fillRect(x0 + pad + b.gx * s, y0 + pad + b.gy * s, Math.max(b.w * s, 3), Math.max(b.h * s, 3));
+    }
+    ctx.fillStyle = 'rgba(90,90,110,0.7)';
+    for (const p of PROPS) ctx.fillRect(x0 + pad + p.gx * s, y0 + pad + p.gy * s, 2, 2);
+    ctx.save();
+    ctx.shadowColor = '#fff'; ctx.shadowBlur = 5;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x0 + pad + player.x * s - 1.5, y0 + pad + player.y * s - 1.5, 4, 4);
+    ctx.restore();
+  }
+}
+
+/* ================================================================
+   10. UIOverlay — prompt, labels, HUD, vignette, enter transition
+   ================================================================ */
+class UIOverlay {
+  constructor(renderer) {
+    this.r = renderer;
+    this.transition = null;
+    this.promptRect = null;
+    this.hudName = document.getElementById('hudName');
+    this.lastHud = '';
+  }
+  startTransition(url) {
+    if (!this.transition) this.transition = { t: 0, url, navigated: false };
+  }
+  update(dt) {
+    if (this.transition) {
+      this.transition.t += dt / CONFIG.TRANSITION_TIME;
+      if (this.transition.t >= 1 && !this.transition.navigated) {
+        this.transition.navigated = true;
+        window.location.href = this.transition.url;
+      }
+    }
+  }
+  setHud(near) {
+    const txt = near ? '&nbsp;<span class="sep">&#9679;</span> ' + near.name : '';
+    if (txt !== this.lastHud) { this.hudName.innerHTML = txt; this.lastHud = txt; }
+  }
+
+  drawLabels(ctx, buildings, t) {
+    this.promptRect = null;
+    for (const b of BUILDINGS) {
+      const isNear = buildings.near === b;
+      const a = P(b.gx + b.w / 2, b.gy + b.h / 2);
+      const topY = a.y - b.promptH;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = isNear ? 1 : 0.42;
+      // name — bold, on top (like a real shop sign)
+      ctx.font = '700 12px "Courier New", monospace';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(5,5,9,0.8)';
+      ctx.strokeText(b.name, a.x, topY - 34);
+      ctx.fillStyle = isNear ? THEME.text : THEME.brass;
+      if (isNear) { ctx.shadowColor = THEME.amber; ctx.shadowBlur = 8; }
+      ctx.fillText(b.name, a.x, topY - 34);
+      ctx.shadowBlur = 0;
+      // subtitle — what it's for, small and quiet underneath
+      if (b.sub) {
+        ctx.font = '700 9px "Courier New", monospace';
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'rgba(5,5,9,0.8)';
+        ctx.strokeText(b.sub, a.x, topY - 21);
+        ctx.fillStyle = isNear ? 'rgba(255,179,71,0.85)' : 'rgba(184,115,51,0.7)';
+        ctx.fillText(b.sub, a.x, topY - 21);
+      }
+      ctx.globalAlpha = 1;
+
+      if (!isNear) continue;
+      const pulse = 1 + 0.055 * Math.sin(t * 6);
+      const cw = 78 * pulse, ch = 20 * pulse;
+      ctx.save();
+      ctx.shadowColor = THEME.amber;
+      ctx.shadowBlur = 9 + 4 * Math.sin(t * 6);
+      ctx.fillStyle = 'rgba(8,8,12,0.88)';
+      ctx.fillRect(a.x - cw / 2, topY - ch / 2, cw, ch);
+      ctx.restore();
+      ctx.strokeStyle = THEME.amber;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(a.x - cw / 2, topY - ch / 2, cw, ch);
+      ctx.font = '700 11px "Courier New", monospace';
+      ctx.fillStyle = THEME.amber;
+      ctx.fillText('[ ENTER ]', a.x, topY + 0.5);
+      this.promptRect = { x: a.x - cw / 2 - 6, y: topY - ch / 2 - 6, w: cw + 12, h: ch + 12, b };
+    }
+  }
+
+  drawScreenFx(ctx) {
+    const { vw, vh } = this.r;
+    if (!this.r.vignette) {
+      // strong, fast falloff to true black — reads as looking INTO a lit diorama
+      // through a dark frame, rather than a soft photographic vignette
+      const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.14, vw / 2, vh / 2, Math.max(vw, vh) * 0.58);
+      g.addColorStop(0, 'rgba(4,4,8,0)');
+      g.addColorStop(0.45, 'rgba(4,4,8,0.28)');
+      g.addColorStop(0.75, 'rgba(3,3,6,0.72)');
+      g.addColorStop(1, 'rgba(1,1,3,1)');
+      this.r.vignette = g;
+    }
+    ctx.fillStyle = this.r.vignette;
+    ctx.fillRect(0, 0, vw, vh);
+
+    if (this.transition) {
+      const k = Math.min(this.transition.t, 1);
+      ctx.fillStyle = 'rgba(255,140,0,' + (0.18 * Math.max(0, 1 - k * 3)) + ')';
+      ctx.fillRect(0, 0, vw, vh);
+      ctx.fillStyle = 'rgba(0,0,0,' + (k * k) + ')';
+      ctx.fillRect(0, 0, vw, vh);
+    }
+  }
+
+  // noir "case file" tooltip for a hovered/tapped NPC — SCREEN space
+  drawHoverTip(ctx, npc, quote) {
+    const sx = npc._sx, sy = npc._sy;
+    if (sx == null) return;
+    const maxW = 190, pad = 10, lineH = 13;
+    ctx.font = 'italic 400 11px "Courier New", monospace';
+    const words = quote.split(' ');
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      const test = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW - pad * 2 && cur) { lines.push(cur); cur = w; }
+      else cur = test;
+    }
+    if (cur) lines.push(cur);
+
+    const nameH = 16;
+    const boxW = maxW;
+    const boxH = pad * 2 + nameH + lines.length * lineH + 4;
+    let bx = sx - boxW / 2, by = sy - boxH - 16;
+    bx = Math.max(6, Math.min(bx, this.r.vw - boxW - 6));
+    by = Math.max(6, by);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(8,8,13,0.94)';
+    ctx.fillRect(bx, by, boxW, boxH);
+    ctx.strokeStyle = 'rgba(255,140,0,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx, by, boxW, boxH);
+    // pin notch
+    ctx.beginPath();
+    ctx.moveTo(sx - 6, by + boxH); ctx.lineTo(sx + 6, by + boxH); ctx.lineTo(sx, by + boxH + 8);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(8,8,13,0.94)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,140,0,0.6)';
+    ctx.stroke();
+
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.font = '700 12px "Courier New", monospace';
+    ctx.fillStyle = THEME.amber;
+    ctx.shadowColor = THEME.amber; ctx.shadowBlur = 4;
+    ctx.fillText(npc.name, bx + pad, by + pad - 1);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(255,140,0,0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(bx + pad, by + pad + nameH - 3); ctx.lineTo(bx + boxW - pad, by + pad + nameH - 3); ctx.stroke();
+    ctx.font = 'italic 400 11px "Courier New", monospace';
+    ctx.fillStyle = THEME.text;
+    lines.forEach((ln, i) => ctx.fillText('"' + (i === 0 ? ln : ln) + (i === lines.length - 1 ? '"' : ''), bx + pad, by + pad + nameH + i * lineH));
+    ctx.restore();
+  }
+}
+
+/* ================================================================
+   11. Atmosphere — moon, clouds, rain, ground fog, wires, grain.
+   ================================================================ */
+class Atmosphere {
+  constructor(renderer) {
+    this.r = renderer;
+    this.drops = null;
+    this.stamp = -1;
+    this.stars = [];
+    for (let i = 0; i < 60; i++)
+      this.stars.push({ x: hash(i * 3.7), y: hash(i * 9.1) * 0.45, a: 0.10 + hash(i * 5.3) * 0.25, ph: hash(i * 7.7) * 6 });
+    this.fogs = [];
+    for (let i = 0; i < 6; i++)
+      this.fogs.push({
+        x: -550 + hash(i * 13.1) * 1100, y: 80 + hash(i * 7.9) * 350,
+        r: 110 + hash(i * 3.3) * 90, sp: 5 + hash(i * 9.7) * 7,
+      });
+    const g = document.createElement('canvas');
+    g.width = g.height = 128;
+    const gc = g.getContext('2d');
+    for (let i = 0; i < 2200; i++) {
+      const v = Math.floor(hash(i * 1.7) * 255);
+      gc.fillStyle = 'rgba(' + v + ',' + v + ',' + v + ',' + (0.5 + hash(i * 2.3) * 0.5) + ')';
+      gc.fillRect(Math.floor(hash(i * 3.1) * 128), Math.floor(hash(i * 4.7) * 128), 1, 1);
+    }
+    this.grain = g;
+    this.grainPattern = null;
+  }
+  ensureDrops() {
+    if (this.stamp === this.r.sizeStamp && this.drops) return;
+    this.stamp = this.r.sizeStamp;
+    this.drops = [];
+    for (let i = 0; i < CONFIG.RAIN_DROPS; i++)
+      this.drops.push({
+        x: Math.random() * (this.r.vw + 100) - 50,
+        y: Math.random() * this.r.vh,
+        l: 7 + Math.random() * 9,
+        s: 380 + Math.random() * 170,
+      });
+  }
+
+  drawSky(ctx, t) {
+    const { vw, vh } = this.r;
+    const sky = ctx.createLinearGradient(0, 0, 0, vh);
+    sky.addColorStop(0, THEME.bgSky);
+    sky.addColorStop(0.6, THEME.bg);
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, vw, vh);
+    for (const s of this.stars) {
+      ctx.fillStyle = 'rgba(200,210,230,' + (s.a * (0.6 + 0.4 * Math.sin(t * 1.7 + s.ph))).toFixed(3) + ')';
+      ctx.fillRect(s.x * vw, s.y * vh, 1.5, 1.5);
+    }
+    const mx = vw * 0.78, my = vh * 0.14;
+    const halo = ctx.createRadialGradient(mx, my, 8, mx, my, 90);
+    halo.addColorStop(0, 'rgba(210,220,235,0.16)');
+    halo.addColorStop(1, 'rgba(210,220,235,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(mx, my, 90, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = THEME.moon;
+    ctx.beginPath(); ctx.arc(mx, my, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(160,172,190,0.5)';
+    ctx.beginPath(); ctx.arc(mx - 8, my - 4, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 6, my + 7, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 9, my - 9, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(9,11,17,0.55)';
+    for (let i = 0; i < 3; i++) {
+      const cw = 190 + i * 70;
+      const cx = ((t * (5 + i * 2.5) + i * 420) % (vw + cw * 2)) - cw;
+      ctx.beginPath();
+      ctx.ellipse(cx, my + (i - 1) * 26, cw / 2, 13 + i * 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawWires(ctx, t) {
+    ctx.strokeStyle = 'rgba(190,195,215,0.13)';
+    ctx.lineWidth = 1;
+    for (const [ia, ib] of WIRES) {
+      const a = P(LAMPS[ia].gx + 0.5, LAMPS[ia].gy + 0.5);
+      const b = P(LAMPS[ib].gx + 0.5, LAMPS[ib].gy + 0.5);
+      const a0 = { x: a.x, y: a.y - 66 }, b0 = { x: b.x, y: b.y - 66 };
+      const mx = (a0.x + b0.x) / 2, my = (a0.y + b0.y) / 2 + 22;
+      ctx.beginPath();
+      ctx.moveTo(a0.x, a0.y);
+      ctx.quadraticCurveTo(mx, my, b0.x, b0.y);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,150,50,' + (0.5 + 0.2 * Math.sin(t * 4 + ia)) + ')';
+      ctx.fillRect(mx - 1.5, my - 4, 3, 4);
+    }
+  }
+
+  drawFog(ctx, dt) {
+    for (const f of this.fogs) {
+      f.x += f.sp * dt;
+      if (f.x > 600) f.x = -600;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.scale(1, 0.42);
+      const g = ctx.createRadialGradient(0, 0, 10, 0, 0, f.r);
+      g.addColorStop(0, 'rgba(' + THEME.fog + ',0.05)');
+      g.addColorStop(1, 'rgba(' + THEME.fog + ',0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(0, 0, f.r, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  drawRain(ctx, dt) {
+    this.ensureDrops();
+    const { vw, vh } = this.r;
+    ctx.strokeStyle = THEME.rain;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const d of this.drops) {
+      d.y += d.s * dt;
+      d.x += d.s * 0.18 * dt;
+      if (d.y > vh) { d.y = -12; d.x = Math.random() * (vw + 100) - 50; }
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(d.x - d.l * 0.18, d.y - d.l);
+    }
+    ctx.stroke();
+  }
+
+  drawGrain(ctx, t) {
+    if (!this.grainPattern) this.grainPattern = ctx.createPattern(this.grain, 'repeat');
+    ctx.save();
+    ctx.globalAlpha = 0.045;
+    ctx.translate(Math.floor(hash(Math.floor(t * 24)) * 128), Math.floor(hash(Math.floor(t * 24) + 7) * 128));
+    ctx.fillStyle = this.grainPattern;
+    ctx.fillRect(-128, -128, this.r.vw + 256, this.r.vh + 256);
+    ctx.restore();
+  }
+}
+
+/* ================================================================
+   12. Game — wiring + main loop
+   ================================================================ */
+class Game {
+  constructor() {
+    this.renderer = new IsometricRenderer(document.getElementById('game'));
+    this.world = new World();
+    this.ui = new UIOverlay(this.renderer);
+    this.buildings = new BuildingManager(this.world, this.ui);
+    this.player = new Player(this.world);
+    this.particles = new ParticleSystem();
+    this.minimap = new Minimap();
+    this.atmosphere = new Atmosphere(this.renderer);
+    this.input = new InputHandler(this);
+    this.pendingEnter = null;
+    this.clickFx = null;
+    this.hoverNPC = null;
+    this.hoverQuoteIdx = 0;
+    this.touchHoverUntil = 0;
+    this.t = 0;
+    this.last = performance.now();
+
+    const pc = P(this.player.x + 0.5, this.player.y + 0.5);
+    this.renderer.cam.x = pc.x;
+    this.renderer.cam.y = pc.y - 40;
+
+    // depth-sorted entity list (static entities; player joins per frame)
+    this.entities = [];
+    for (const f of BACKDROP) this.entities.push({
+      minX: f.gx, minY: f.gy, maxX: f.gx + f.w - 1, maxY: f.gy + f.h - 1,
+      draw: (ctx, t) => this.buildings.drawBackdropBody(ctx, f, 0.24, t),
+    });
+    for (const b of BUILDINGS) this.entities.push({
+      minX: b.gx, minY: b.gy, maxX: b.gx + b.w - 1, maxY: b.gy + b.h - 1,
+      draw: (ctx, t) => this.buildings.drawBuilding(ctx, b, t),
+    });
+    LAMPS.forEach((l, i) => this.entities.push({
+      minX: l.gx, minY: l.gy, maxX: l.gx, maxY: l.gy,
+      draw: (ctx, t) => this.buildings.drawLamp(ctx, l, i, t),
+    }));
+    for (const p of PROPS) this.entities.push({
+      minX: p.gx, minY: p.gy, maxX: p.gx, maxY: p.gy,
+      draw: (ctx) => this.buildings.drawProp(ctx, p),
+    });
+    NPCS.forEach((n, i) => this.entities.push({
+      minX: n.gx, minY: n.gy, maxX: n.gx, maxY: n.gy,
+      draw: (ctx, t) => this.buildings.drawNPC(ctx, n, i, t),
+    }));
+
+    requestAnimationFrame((now) => this.frame(now));
+  }
+
+  /* ---------- interaction ---------- */
+  tryEnterNear() {
+    if (this.ui.transition) return;
+    if (this.buildings.near) this.buildings.enter(this.buildings.near);
+  }
+  isOverPrompt(cx, cy) {
+    const pr = this.ui.promptRect;
+    if (!pr) return false;
+    const w = this.renderer.screenToWorld(cx, cy);
+    return w.x >= pr.x && w.x <= pr.x + pr.w && w.y >= pr.y && w.y <= pr.y + pr.h;
+  }
+  // mouse hover — re-rolls the quote only when the hovered NPC changes
+  updateHover(cx, cy) {
+    this.touchHoverUntil = 0;
+    let found = null;
+    for (const n of NPCS) {
+      if (n._sx == null) continue;
+      const dx = cx - n._sx, dy = cy - n._sy;
+      if (dx * dx + dy * dy < CONFIG.HOVER_RADIUS * CONFIG.HOVER_RADIUS) { found = n; break; }
+    }
+    if (found !== this.hoverNPC) {
+      this.hoverNPC = found;
+      if (found) this.hoverQuoteIdx = Math.floor(Math.random() * found.quotes.length);
+    }
+  }
+  clearHover() { this.hoverNPC = null; this.touchHoverUntil = 0; }
+
+  onPointerDown(cx, cy) {
+    if (this.ui.transition) return;
+    // tap an NPC (touch has no hover) — show the tooltip briefly
+    for (const n of NPCS) {
+      if (n._sx == null) continue;
+      const dx = cx - n._sx, dy = cy - n._sy;
+      if (dx * dx + dy * dy < (CONFIG.HOVER_RADIUS + 4) * (CONFIG.HOVER_RADIUS + 4)) {
+        this.hoverNPC = n;
+        this.hoverQuoteIdx = Math.floor(Math.random() * n.quotes.length);
+        this.touchHoverUntil = this.t + CONFIG.TOUCH_HOVER_TIME;
+        return;
+      }
+    }
+    if (this.isOverPrompt(cx, cy)) { this.pendingEnter = null; this.buildings.enter(this.ui.promptRect.b); return; }
+    const w = this.renderer.screenToWorld(cx, cy);
+    const g = this.renderer.unproject(w.x, w.y);
+    const tx = Math.floor(g.x), ty = Math.floor(g.y);
+    if (!this.world.inBounds(tx, ty)) return;
+    const b = this.world.buildingAtTile(tx, ty);
+    const o = this.player.planOrigin();
+    this.pendingEnter = null;
+    if (b) {
+      // always walk to the building's front door, then auto-enter on arrival
+      if (o.x === b.door.x && o.y === b.door.y) { this.buildings.enter(b); return; }
+      const path = this.world.findPath(o.x, o.y, b.door.x, b.door.y);
+      if (path) {
+        this.player.setPath(path);
+        this.pendingEnter = b;
+        this.clickFx = { gx: b.door.x, gy: b.door.y, age: 0 };
+      }
+    } else if (this.world.isWalkable(tx, ty)) {
+      this.player.setPath(this.world.findPath(o.x, o.y, tx, ty));
+      this.clickFx = { gx: tx, gy: ty, age: 0 };
+    }
+  }
+
+  /* ---------- main loop ---------- */
+  frame(now) {
+    const dt = Math.min((now - this.last) / 1000, 0.05);
+    this.last = now;
+    this.t += dt;
+    const r = this.renderer, ctx = r.ctx;
+
+    // -- update --------------------------------------------------
+    this.player.update(dt, this.input);
+    if (this.pendingEnter && !this.player.target && this.player.path.length === 0) {
+      const b = this.pendingEnter;
+      this.pendingEnter = null;
+      if (this.player.tx === b.door.x && this.player.ty === b.door.y) {
+        this.player.facing = b.door.face;
+        this.buildings.enter(b);
+      }
+    }
+    this.buildings.update(this.player);
+    this.particles.update(dt);
+    this.ui.update(dt);
+    this.ui.setHud(this.buildings.near);
+    if (this.touchHoverUntil && this.t > this.touchHoverUntil) { this.hoverNPC = null; this.touchHoverUntil = 0; }
+    const pc = P(this.player.x + 0.5, this.player.y + 0.5);
+    const k = Math.min(1, dt * CONFIG.CAM_LERP);
+    r.cam.x += (pc.x - r.cam.x) * k;
+    r.cam.y += (pc.y - 40 - r.cam.y) * k;
+
+    // NPC screen anchors for hover/tap hit-testing, refreshed every frame
+    for (const n of NPCS) {
+      const s = r.worldToScreen(n._wx != null ? n._wx : P(n.gx + 0.5, n.gy + 0.5).x, n._wy != null ? n._wy : P(n.gx + 0.5, n.gy + 0.5).y);
+      n._sx = s.x; n._sy = s.y;
+    }
+
+    // -- render --------------------------------------------------
+    ctx.setTransform(r.dpr, 0, 0, r.dpr, 0, 0);
+    this.atmosphere.drawSky(ctx, this.t);
+
+    r.begin();
+    this.world.drawGround(r, this.t);
+
+    if (this.clickFx) {
+      this.clickFx.age += dt;
+      if (this.clickFx.age > 0.5) this.clickFx = null;
+      else {
+        const kk = this.clickFx.age / 0.5;
+        const c = P(this.clickFx.gx + 0.5, this.clickFx.gy + 0.5);
+        ctx.strokeStyle = 'rgba(255,140,0,' + (0.5 * (1 - kk)) + ')';
+        ctx.lineWidth = 1.5;
+        poly(ctx, [
+          { x: c.x, y: c.y - HH * kk }, { x: c.x + HW * kk, y: c.y },
+          { x: c.x, y: c.y + HH * kk }, { x: c.x - HW * kk, y: c.y },
+        ], null, ctx.strokeStyle, 1.5);
+      }
+    }
+
+    const vb = r.viewBounds(320);
+    const list = [];
+    for (const e of this.entities) {
+      const p0 = P(e.minX, e.minY), p1 = P(e.maxX + 1, e.maxY + 1);
+      const cx2 = (p0.x + p1.x) / 2, cy2 = (p0.y + p1.y) / 2;
+      if (cx2 < vb.l || cx2 > vb.r || cy2 < vb.t || cy2 > vb.b2) continue;
+      list.push(e);
+    }
+    const px = this.player.x, py = this.player.y;
+    list.push({ minX: px, minY: py, maxX: px, maxY: py, draw: (c, t) => this.player.draw(c, t) });
+    list.sort((a, b2) => {
+      if (a.minX > b2.maxX || a.minY > b2.maxY) return 1;
+      if (b2.minX > a.maxX || b2.minY > a.maxY) return -1;
+      return (a.maxX + a.maxY) - (b2.maxX + b2.maxY);
+    });
+    for (const e of list) e.draw(ctx, this.t);
+
+    this.atmosphere.drawWires(ctx, this.t);
+    this.particles.draw(ctx);
+    this.atmosphere.drawFog(ctx, dt);
+    this.ui.drawLabels(ctx, this.buildings, this.t);
+    r.end();
+
+    // -- screen-space finish -------------------------------------
+    this.atmosphere.drawRain(ctx, dt);
+    this.ui.drawScreenFx(ctx);
+    this.atmosphere.drawGrain(ctx, this.t);
+    this.minimap.draw(ctx, this.player);
+    if (this.hoverNPC) this.ui.drawHoverTip(ctx, this.hoverNPC, this.hoverNPC.quotes[this.hoverQuoteIdx % this.hoverNPC.quotes.length]);
+
+    requestAnimationFrame((n) => this.frame(n));
+  }
+}
+
+window.game = new Game();   // exposed for debugging in the console
+</script>
+</body>
+</html>
