@@ -30,8 +30,9 @@ const capturePlugin = {
 // it serves source untransformed and bare imports like "three" break).
 const root = fileURLToPath(new URL('.', import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   root,
+  base: command === 'build' ? '/Portfolio-UT/' : '/',
   plugins: [capturePlugin],
   resolve: { preserveSymlinks: true },
   server: {
@@ -39,4 +40,4 @@ export default defineConfig({
     port: 5173,
     fs: { allow: [root] },
   },
-});
+}));
