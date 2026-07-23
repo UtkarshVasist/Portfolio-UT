@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 // A handful of faint motes drifting up through the plaza — kept sparse
 // and dim so it reads as atmosphere, not a snow/ash effect.
-export function createDust(count = 26, radius = 13) {
+export function createDust(count = 22, radius = 13) {
   const positions = new Float32Array(count * 3);
   const speeds = new Float32Array(count);
   const drift = new Float32Array(count * 2);
@@ -19,7 +19,7 @@ export function createDust(count = 26, radius = 13) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   const mat = new THREE.PointsMaterial({
-    color: 0xaab0c8, size: 0.028, transparent: true, opacity: 0.18,
+    color: 0xaab0c8, size: 0.026, transparent: true, opacity: 0.15,
     depthWrite: false, sizeAttenuation: true,
   });
   const points = new THREE.Points(geo, mat);

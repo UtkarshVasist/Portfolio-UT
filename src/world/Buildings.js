@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { THEME, BUILDINGS } from '../config.js';
 
 // Builds the 5 hero buildings from BUILDINGS data. Each is a low-poly
@@ -63,19 +62,23 @@ function noiseBumpTexture() {
 // standard shared bump settings, spread onto any body/roof material
 const BUMP = { bumpMap: noiseBumpTexture(), bumpScale: 0.035 };
 
-// Window quads are batched into at most two draw calls per building (lit +
-// dim) instead of one Mesh per window — with dozens of windows per facade
-// across several buildings, individual meshes were the single biggest
-// contributor to draw-call count and frame hitches.
-const _dummy = new THREE.Object3D();
 function makeWindows(w, h, d, height, accent) {
+  // emissive window quads on the four side faces. Three tiers so the gas
+  // lamps (Props.js) stay the plaza's main light source: most lit windows
+  // are "passive" (visibly warm but under the bloom threshold, no glow),
+  // a minority are dark, and a small minority keep the original bright
+  // bloom "loom" for variety.
   const group = new THREE.Group();
-  const winMat = new THREE.MeshStandardMaterial({
+  const brightMat = new THREE.MeshStandardMaterial({
     color: THEME.windowLit, emissive: THEME.windowLit,
-    emissiveIntensity: 1.0, roughness: 1, metalness: 0,
+    emissiveIntensity: 1.6, roughness: 1, metalness: 0,
+  });
+  const passiveMat = new THREE.MeshStandardMaterial({
+    color: THEME.windowLit, emissive: THEME.windowLit,
+    emissiveIntensity: 0.7, roughness: 1, metalness: 0,
   });
   const dimMat = new THREE.MeshStandardMaterial({
-    color: 0x14131c, emissive: 0x3a2a16, emissiveIntensity: 0.3,
+    color: 0x14131c, emissive: 0x3a2a16, emissiveIntensity: 0.35,
     roughness: 1, metalness: 0,
   });
   const winGeo = new THREE.PlaneGeometry(0.5, 0.7);
@@ -89,34 +92,30 @@ function makeWindows(w, h, d, height, accent) {
     { n: [-1, 0, 0], span: d, off: [-w / 2 - 0.02, 0, 0] },
   ];
   let seed = w * 13.1 + height * 7.7;
-  const litGeoms = [];
-  const dimGeoms = [];
   for (const f of faces) {
     const fcols = Math.max(2, Math.floor(f.span / 1.1));
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < fcols; c++) {
         seed += 1;
-        const lit = (Math.sin(seed * 12.9898) * 43758.5453 % 1 + 1) % 1 > 0.42;
+        const rnd = (Math.sin(seed * 12.9898) * 43758.5453 % 1 + 1) % 1;
+        const mat = rnd <= 0.42 ? dimMat : rnd <= 0.8 ? passiveMat : brightMat;
+        const m = new THREE.Mesh(winGeo, mat);
         const u = (c + 0.5) / fcols - 0.5;
         const v = (r + 0.6) / rows;
-        _dummy.position.set(
+        m.position.set(
           f.off[0] + f.n[2] * u * f.span,
           v * (height - 0.6) + 0.3,
           f.off[2] + f.n[0] * -u * f.span,
         );
-        _dummy.lookAt(
-          _dummy.position.x + f.n[0],
-          _dummy.position.y,
-          _dummy.position.z + f.n[2],
+        m.lookAt(
+          m.position.x + f.n[0],
+          m.position.y,
+          m.position.z + f.n[2],
         );
-        _dummy.updateMatrix();
-        const geo = winGeo.clone().applyMatrix4(_dummy.matrix);
-        (lit ? litGeoms : dimGeoms).push(geo);
+        group.add(m);
       }
     }
   }
-  if (litGeoms.length) group.add(new THREE.Mesh(mergeGeometries(litGeoms), winMat));
-  if (dimGeoms.length) group.add(new THREE.Mesh(mergeGeometries(dimGeoms), dimMat));
   return group;
 }
 
@@ -144,6 +143,18 @@ function makeTower(b) {
   beacon.position.y = b.height + b.height * 0.16 + 0.3;
   beacon.userData.beacon = true;
   g.add(beacon);
+
+  // soft stage-light: a real, short-range SpotLight only (no visible beam
+  // geometry) raking in from the upper-left, pooling near the beacon —
+  // the beacon itself is the only visible "cone" marker. `distance` must
+  // clear the actual light-to-target span (~8.4 here) or the built-in
+  // falloff window zeroes the light out entirely before it reaches it.
+  const spot = new THREE.SpotLight(0xffdcb0, 4.5, 12, 0.55, 0.95, 2);
+  spot.position.set(-3.5, beacon.position.y + 1.5, -3);
+  spot.target.position.set(0, b.height * 0.55, 0);
+  g.add(spot);
+  g.add(spot.target);
+
   g.add(makeWindows(w, d, d, b.height, b.accent));
   return g;
 }
@@ -157,9 +168,10 @@ function makeBlock(b, roofTrim) {
   addEdges(body);
   g.add(body);
   if (roofTrim) {
+    const trimColor = _topColor.setHex(roofTrim).multiplyScalar(0.5).getHex();
     const trim = new THREE.Mesh(
       new THREE.BoxGeometry(w + 0.15, 0.18, d + 0.15),
-      new THREE.MeshStandardMaterial({ color: roofTrim, emissive: roofTrim, emissiveIntensity: 0.3, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: trimColor, emissive: roofTrim, emissiveIntensity: 0.12, roughness: 0.85 }),
     );
     trim.position.y = b.height + 0.05;
     g.add(trim);

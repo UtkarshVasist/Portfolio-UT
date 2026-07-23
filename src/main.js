@@ -9,6 +9,8 @@ import { createBuildings } from './world/Buildings.js';
 import { createBackdrop } from './world/Backdrop.js';
 import { createProps, createFlyingPaper, updateNPCs, updatePaper } from './world/Props.js';
 import { createDust } from './fx/dust.js';
+import { createRats, updateRats } from './world/Rats.js';
+import { createOcclusionAura } from './fx/occlusionAura.js';
 import { Player } from './player/Player.js';
 import { Controls } from './player/Controls.js';
 import { Overlay } from './ui/overlay.js';
@@ -18,7 +20,7 @@ const container = document.getElementById('app');
 // ---- renderer ----
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -28,9 +30,9 @@ container.appendChild(renderer.domElement);
 // ---- scene + fog (fades everything to near-black at distance) ----
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(THEME.bg);
-// backdrop ring sits at radius 16.5-24.5; keep fog past all of it so the
+// backdrop ring sits at radius 24-42; keep fog past all of it so the near
 // ring reads clearly and only the deep background (beyond the instances) fades
-scene.fog = new THREE.Fog(THEME.bg, 26, 55);
+scene.fog = new THREE.Fog(THEME.bg, 40, 70);
 
 // ---- camera ----
 const rig = new CameraRig(container);
@@ -58,9 +60,15 @@ scene.add(paperGroup);
 const dust = createDust();
 scene.add(dust.points);
 
+const { group: ratGroup, rats } = createRats();
+scene.add(ratGroup);
+
 // ---- player ----
 const player = new Player();
 scene.add(player.group);
+
+const occlusionAura = createOcclusionAura(player);
+scene.add(occlusionAura.group);
 
 // ---- UI ----
 const overlay = new Overlay(container, buildings);
@@ -109,6 +117,7 @@ function frame() {
   const near = controls.update();
   player.update(dt, buildings);
   rig.update(dt, player.pos);
+  occlusionAura.update();
   overlay.setNear(near);
   overlay.setHovered(hoveredBuilding);
   overlay.update(dt);
@@ -126,6 +135,7 @@ function frame() {
 
   // street life: NPCs wander, litter blows across the plaza
   updateNPCs(npcs, dt, t);
+  updateRats(rats, dt, t);
   updatePaper(papers, dt, t, paperRadius);
   dust.update(dt);
 

@@ -38,18 +38,14 @@ export class Overlay {
       this.labels.set(b.data.id, el);
     }
 
-    // bottom HUD
+    // minimal glass HUD, top-right
     const hud = document.createElement('div');
     hud.id = 'hud';
     hud.innerHTML =
-      `<span class="key">WASD</span> MOVE` +
-      `<span class="sep">•</span>` +
-      `<span class="key">CLICK</span> GO` +
-      `<span class="sep">•</span>` +
-      `<span class="key">E</span> ENTER` +
-      `<span id="hud-name"></span>`;
+      `<span class="hud-row"><span class="key">WASD</span>Move</span>` +
+      `<span class="hud-row"><span class="key">Click</span>Go</span>` +
+      `<span class="hud-row"><span class="key">E</span>Enter</span>`;
     container.appendChild(hud);
-    this.hudName = hud.querySelector('#hud-name');
 
     // title
     const title = document.createElement('div');
@@ -90,8 +86,6 @@ export class Overlay {
     for (const [id, el] of this.labels) {
       el.classList.toggle('is-near', id === nearId || id === hovId);
     }
-    const shown = this.near || this.hovered;
-    this.hudName.textContent = shown ? '  •  ' + shown.data.name : '';
   }
 
   showTooltip(npc, sx, sy) {
