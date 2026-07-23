@@ -16,7 +16,10 @@ export function createComposer(renderer, scene, camera, container) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
-  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.32, 0.4, 0.48);
+  // threshold raised so the lamps (bright point-light glass, ~2.4 emissive)
+  // and the minority of "loom" windows stay the dominant bloom source,
+  // while passive-lit windows read as flat warm light with no glow
+  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.6, 0.68);
   composer.addPass(bloom);
 
   composer.addPass(new OutputPass());

@@ -31,6 +31,10 @@ export const CONFIG = {
   ISO_ELEV: 0.62,                // ~35° pitch
   CAM_ZOOM: 46,                  // orthographic units-to-pixels-ish; larger = closer
   CAM_LERP: 3.2,                 // damped follow speed
+  ZOOM_MIN: 0.9,                 // scroll-wheel zoom range (1 = default frustum)
+  ZOOM_MAX: 1.1,
+  ZOOM_WHEEL_SENS: 0.0011,       // wheel-delta to zoom-target multiplier
+  ZOOM_LERP: 5.5,                // damped approach speed toward the zoom target
   PLAYER_SPEED: 5.2,             // world units / sec
   PLAYER_ACCEL: 14,              // approach speed
   PLAYER_RADIUS: 0.42,
@@ -105,6 +109,10 @@ export const NPCS = [
     quotes: ['The commit history alone tells a story.', 'I heard they debug in their sleep.', 'Cleanest codebase I\'ve ever reviewed.'] },
   { pos: [9.5, -4.5], coat: 0x2f4a3a, hat: 0x16221a, umbrella: true, name: 'Priya Shah',
     quotes: ['Every animation feels intentional.', 'They turned a bug report into a feature.', 'I\'d follow that career path in a heartbeat.'] },
+  { pos: [-9.2, 4.6], coat: 0x442a2a, hat: 0x1c1414, name: 'Dex Ainsley',
+    quotes: ['This place never quite sleeps.', 'Every corner\'s got something lit up.', 'Good spot for a late walk.'] },
+  { pos: [8.6, 0.8], coat: 0x2a3a44, hat: 0x141c22, umbrella: true, name: 'Nell Ostrowski',
+    quotes: ['The skyline out here has a real boulevard feel.', 'I keep circling back to look at that skyline.', 'Never seen a portfolio with this much atmosphere.'] },
 ];
 
 // Gas lamp posts — warm point lights ring the plaza
@@ -117,6 +125,9 @@ export const PROPS = [
   { pos: [-2.4, -2.2], kind: 'crate' },
   { pos: [3.0, -2.0], kind: 'barrel' },
   { pos: [6.0, 3.2], kind: 'crate' },
+  { pos: [-7.2, 4.4], kind: 'barrel' },
+  { pos: [8.0, 4.6], kind: 'crate' },
+  { pos: [1.2, 7.6], kind: 'barrel' },
 ];
 
 export const PLAYER_START = [0, 3];   // clear of the fountain, now centered at the origin
