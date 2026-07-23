@@ -55,20 +55,26 @@ export function createBackdrop() {
   group.add(inst);
 
   // a handful of faint warm window specks on the near backdrop, so it
-  // isn't a dead black wall — kept sparse and dim
+  // isn't a dead black wall — kept sparse and dim. One InstancedMesh
+  // instead of 40 separate Mesh objects/draw calls.
+  const SPECK_COUNT = 40;
   const speckGeo = new THREE.PlaneGeometry(0.4, 0.5);
   const speckMat = new THREE.MeshStandardMaterial({
     color: 0x7a4a1c, emissive: 0xb8701f, emissiveIntensity: 0.7,
     transparent: true, opacity: 0.5, side: THREE.DoubleSide,
   });
-  for (let i = 0; i < 40; i++) {
+  const speckInst = new THREE.InstancedMesh(speckGeo, speckMat, SPECK_COUNT);
+  for (let i = 0; i < SPECK_COUNT; i++) {
     const ang = rand(i * 11.1) * Math.PI * 2;
     const radius = 17 + rand(i * 13.3) * 7;
-    const m = new THREE.Mesh(speckGeo, speckMat);
-    m.position.set(Math.cos(ang) * radius, 2 + rand(i * 17.7) * 14, Math.sin(ang) * radius);
-    m.lookAt(0, m.position.y, 0);
-    group.add(m);
+    dummy.position.set(Math.cos(ang) * radius, 2 + rand(i * 17.7) * 14, Math.sin(ang) * radius);
+    dummy.scale.set(1, 1, 1);
+    dummy.lookAt(0, dummy.position.y, 0);
+    dummy.updateMatrix();
+    speckInst.setMatrixAt(i, dummy.matrix);
   }
+  speckInst.instanceMatrix.needsUpdate = true;
+  group.add(speckInst);
 
   return group;
 }

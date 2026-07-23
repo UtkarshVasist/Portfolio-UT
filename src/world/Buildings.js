@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { THEME, BUILDINGS } from '../config.js';
 
 // Builds the 5 hero buildings from BUILDINGS data. Each is a low-poly
@@ -62,6 +63,11 @@ function noiseBumpTexture() {
 // standard shared bump settings, spread onto any body/roof material
 const BUMP = { bumpMap: noiseBumpTexture(), bumpScale: 0.035 };
 
+// Window quads are batched into at most three draw calls per building
+// (dim/passive/bright) instead of one Mesh per window — with dozens of
+// windows per facade across several buildings, individual meshes were
+// the single biggest contributor to draw-call count and frame hitches.
+const _winDummy = new THREE.Object3D();
 function makeWindows(w, h, d, height, accent) {
   // emissive window quads on the four side faces. Three tiers so the gas
   // lamps (Props.js) stay the plaza's main light source: most lit windows
@@ -83,7 +89,6 @@ function makeWindows(w, h, d, height, accent) {
   });
   const winGeo = new THREE.PlaneGeometry(0.5, 0.7);
 
-  const cols = Math.max(2, Math.floor(w / 1.1));
   const rows = Math.max(2, Math.floor(height / 1.3));
   const faces = [
     { n: [0, 0, 1], span: w, off: [0, 0, d / 2 + 0.02] },
@@ -92,30 +97,34 @@ function makeWindows(w, h, d, height, accent) {
     { n: [-1, 0, 0], span: d, off: [-w / 2 - 0.02, 0, 0] },
   ];
   let seed = w * 13.1 + height * 7.7;
+  const dimGeoms = [], passiveGeoms = [], brightGeoms = [];
   for (const f of faces) {
     const fcols = Math.max(2, Math.floor(f.span / 1.1));
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < fcols; c++) {
         seed += 1;
         const rnd = (Math.sin(seed * 12.9898) * 43758.5453 % 1 + 1) % 1;
-        const mat = rnd <= 0.42 ? dimMat : rnd <= 0.8 ? passiveMat : brightMat;
-        const m = new THREE.Mesh(winGeo, mat);
+        const bucket = rnd <= 0.42 ? dimGeoms : rnd <= 0.8 ? passiveGeoms : brightGeoms;
         const u = (c + 0.5) / fcols - 0.5;
         const v = (r + 0.6) / rows;
-        m.position.set(
+        _winDummy.position.set(
           f.off[0] + f.n[2] * u * f.span,
           v * (height - 0.6) + 0.3,
           f.off[2] + f.n[0] * -u * f.span,
         );
-        m.lookAt(
-          m.position.x + f.n[0],
-          m.position.y,
-          m.position.z + f.n[2],
+        _winDummy.lookAt(
+          _winDummy.position.x + f.n[0],
+          _winDummy.position.y,
+          _winDummy.position.z + f.n[2],
         );
-        group.add(m);
+        _winDummy.updateMatrix();
+        bucket.push(winGeo.clone().applyMatrix4(_winDummy.matrix));
       }
     }
   }
+  if (dimGeoms.length) group.add(new THREE.Mesh(mergeGeometries(dimGeoms), dimMat));
+  if (passiveGeoms.length) group.add(new THREE.Mesh(mergeGeometries(passiveGeoms), passiveMat));
+  if (brightGeoms.length) group.add(new THREE.Mesh(mergeGeometries(brightGeoms), brightMat));
   return group;
 }
 

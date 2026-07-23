@@ -18,9 +18,12 @@ import { Overlay } from './ui/overlay.js';
 const container = document.getElementById('app');
 
 // ---- renderer ----
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+// antialias is off deliberately: the EffectComposer's bloom pass already
+// softens the final image, and MSAA on the primary context is wasted
+// work once post-processing is in the pipeline
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;

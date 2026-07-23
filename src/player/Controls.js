@@ -19,6 +19,7 @@ export class Controls {
     this.keys = new Set();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
+    this._dir = new THREE.Vector3();     // scratch for applyKeyboard(), reused every frame
     this.pendingEnter = null;     // building we're walking to, to auto-enter
     this.touchHoverUntil = 0;
     this.lastClick = { id: null, t: 0 };   // for double-click-to-skip-the-walk
@@ -148,15 +149,16 @@ export class Controls {
     if (b) this.onEnter(b.data);
   }
 
-  // called each frame before player.update
+  // called each frame before player.update — reuses a scratch vector
+  // (this._dir) rather than allocating one every frame forever
   applyKeyboard() {
-    const dir = new THREE.Vector3();
+    const dir = this._dir.set(0, 0, 0);
     const f = this.rig.forward(), r = this.rig.right();
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) dir.add(f);
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) dir.sub(f);
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) dir.add(r);
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) dir.sub(r);
-    if (dir.lengthSq() > 0) { dir.normalize(); this.player.desiredDir = dir; }
+    if (dir.lengthSq() > 0) { dir.normalize(); this.player.desiredDir.copy(dir); }
   }
 
   // returns the building whose door is in range (for the ENTER prompt)

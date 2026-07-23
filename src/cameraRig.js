@@ -27,6 +27,12 @@ export class CameraRig {
     this.camera.lookAt(this.target);
     this.resize();
 
+    // scratch vectors reused by forward()/right() every frame — these
+    // are called from the keyboard-input hot path, so avoiding a fresh
+    // allocation each call matters over a long play session
+    this._forward = new THREE.Vector3();
+    this._right = new THREE.Vector3();
+
     // scroll-wheel zoom — a small, smooth range around the default framing
     container.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -35,14 +41,18 @@ export class CameraRig {
     }, { passive: false });
   }
 
-  // camera-relative movement basis (so WASD feels aligned to the view)
+  // camera-relative movement basis (so WASD feels aligned to the view).
+  // Returns shared scratch vectors — callers must use the value before
+  // the next forward()/right() call, not retain the reference.
   forward() {
-    const f = new THREE.Vector3(-this.offset.x, 0, -this.offset.z);
-    return f.lengthSq() ? f.normalize() : new THREE.Vector3(0, 0, -1);
+    this._forward.set(-this.offset.x, 0, -this.offset.z);
+    if (this._forward.lengthSq()) this._forward.normalize();
+    else this._forward.set(0, 0, -1);
+    return this._forward;
   }
   right() {
     const f = this.forward();
-    return new THREE.Vector3(-f.z, 0, f.x);   // cross(forward, up) — was inverted
+    return this._right.set(-f.z, 0, f.x);   // cross(forward, up) — was inverted
   }
 
   update(dt, playerPos) {

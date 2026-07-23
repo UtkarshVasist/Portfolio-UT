@@ -9,7 +9,7 @@ export function addLighting(scene) {
   const moon = new THREE.DirectionalLight(THEME.moon, 2.7);
   moon.position.set(-14, 22, 10);
   moon.castShadow = true;
-  moon.shadow.mapSize.set(2048, 2048);
+  moon.shadow.mapSize.set(1024, 1024);
   moon.shadow.camera.near = 1;
   moon.shadow.camera.far = 80;
   const s = 26;

@@ -58,28 +58,37 @@ export class Player {
 
     this.group.scale.setScalar(1.2);   // a touch larger so the character reads
     this.group.position.copy(this.pos);
+
+    // scratch vectors reused every frame in update() — this runs
+    // indefinitely at 60fps, so allocating fresh Vector3s here was
+    // steady GC pressure that showed up as periodic stutter over a
+    // longer play session
+    this._dirScratch = new THREE.Vector3();
+    this._to = new THREE.Vector3();
+    this._desiredVel = new THREE.Vector3();
+    this._next = new THREE.Vector3();
   }
 
   // buildings: array from createBuildings().meshes (with center/half/solid)
   update(dt, buildings) {
     // resolve desired direction: click-target takes over until reached,
     // but any keyboard input cancels it (handled in Controls)
-    let dir = this.desiredDir;
+    let dir = this._dirScratch.copy(this.desiredDir);
     if (this.moveTarget) {
-      const to = new THREE.Vector3().subVectors(this.moveTarget, this.pos);
+      const to = this._to.subVectors(this.moveTarget, this.pos);
       to.y = 0;
-      if (to.length() < 0.15) { this.moveTarget = null; dir = new THREE.Vector3(); }
+      if (to.length() < 0.15) { this.moveTarget = null; dir.set(0, 0, 0); }
       else dir = to.normalize();
     }
 
     // accelerate toward desired velocity
-    const desiredVel = dir.clone().multiplyScalar(CONFIG.PLAYER_SPEED);
+    const desiredVel = this._desiredVel.copy(dir).multiplyScalar(CONFIG.PLAYER_SPEED);
     const a = 1 - Math.exp(-CONFIG.PLAYER_ACCEL * dt);
     this.vel.x += (desiredVel.x - this.vel.x) * a;
     this.vel.z += (desiredVel.z - this.vel.z) * a;
 
     // integrate + collide (slide) against building boxes
-    const next = this.pos.clone().addScaledVector(this.vel, dt);
+    const next = this._next.copy(this.pos).addScaledVector(this.vel, dt);
     this.collide(next, buildings);
     this.containInLitPlaza(next);
     this.pos.copy(next);
@@ -98,7 +107,7 @@ export class Player {
     this.group.position.set(this.pos.x, Math.abs(Math.sin(this.bob)) * 0.08, this.pos.z);
     this.group.rotation.y = this.facing;
 
-    this.desiredDir = new THREE.Vector3();   // consumed; Controls sets it each frame
+    this.desiredDir.set(0, 0, 0);   // consumed; Controls sets it each frame
   }
 
   // keeps the player inside the lit plaza — never out in the dark/blurred rim

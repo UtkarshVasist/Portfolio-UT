@@ -18,15 +18,18 @@ export function createComposer(renderer, scene, camera, container) {
 
   // threshold raised so the lamps (bright point-light glass, ~2.4 emissive)
   // and the minority of "loom" windows stay the dominant bloom source,
-  // while passive-lit windows read as flat warm light with no glow
-  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.6, 0.68);
+  // while passive-lit windows read as flat warm light with no glow.
+  // Bloom is inherently low-frequency/blurry, so running its several
+  // downsample/blur mip passes at half resolution is basically free
+  // visually but roughly quarters that part of the frame cost.
+  const bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.55, 0.6, 0.68);
   composer.addPass(bloom);
 
   composer.addPass(new OutputPass());
 
   function setSize(width, height) {
     composer.setSize(width, height);
-    bloom.setSize(width, height);
+    bloom.setSize(width / 2, height / 2);
   }
 
   return { composer, bloom, setSize };
