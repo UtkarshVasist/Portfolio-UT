@@ -61,22 +61,22 @@ export const CONFIG = {
 export const BUILDINGS = [
   {
     id: 'projects', name: 'PROJECTS', sub: 'Portfolio', type: 'tower',
-    url: '/projects', accent: THEME.amber, mm: '#ff8c00',
+    url: 'projects.html', accent: THEME.amber, mm: '#ff8c00',
     pos: [0, -7.5], size: [5.5, 4], height: 8.5, door: [0, -5.0],
   },
   {
     id: 'about', name: 'ABOUT ME', sub: 'Bio', type: 'brownstone',
-    url: '/about', accent: THEME.copper, mm: '#b87333',
+    url: 'about.html', accent: THEME.copper, mm: '#b87333',
     pos: [-8, -1], size: [3.5, 3], height: 4.2, door: [-6.0, -1],
   },
   {
     id: 'skills', name: 'SKILLS', sub: 'Expertise', type: 'guild',
-    url: '/skills', accent: THEME.brass, mm: '#c5a028',
+    url: 'skills.html', accent: THEME.brass, mm: '#c5a028',
     pos: [8, -1], size: [3.5, 3], height: 4.6, door: [6.0, -1],
   },
   {
     id: 'resume', name: 'RESUME', sub: 'Résumé', type: 'kiosk',
-    url: '/resume', accent: THEME.orange, mm: '#ff6b00',
+    url: 'resume.html', accent: THEME.orange, mm: '#ff6b00',
     pos: [-5.5, 6], size: [2.6, 2], height: 2.6, door: [-4.0, 4.8],
   },
   {
@@ -91,7 +91,7 @@ export const BUILDINGS = [
   // it's flavor signage, reusing every interaction path unmodified.
   {
     id: 'showcase', name: 'PROJECT SHOWCASE', sub: 'Case Studies', type: 'billboard',
-    url: '/projects', accent: THEME.amber, mm: '#c5a028',
+    url: 'projects.html', accent: THEME.amber, mm: '#c5a028',
     pos: [3.2, -4.0], size: [1.2, 0.8], height: 3.0, door: [3.2, -2.0],
   },
 ];

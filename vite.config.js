@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // DEV-ONLY: lets the running page POST a canvas dataURL to be written
 // to disk, so frames can be inspected when the preview screenshot tool
@@ -39,5 +40,19 @@ export default defineConfig(({ command }) => ({
     host: true,
     port: 5173,
     fs: { allow: [root] },
+  },
+  build: {
+    // the building-entry pages are separate static HTML files, not part
+    // of the main SPA bundle — without listing them Vite only builds
+    // index.html and these 404 in production
+    rollupOptions: {
+      input: {
+        main: resolve(root, 'index.html'),
+        about: resolve(root, 'about.html'),
+        skills: resolve(root, 'skills.html'),
+        resume: resolve(root, 'resume.html'),
+        projects: resolve(root, 'projects.html'),
+      },
+    },
   },
 }));
